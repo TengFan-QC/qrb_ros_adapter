@@ -3,10 +3,11 @@
 #
 # ROS/HCM-independent runtime shared by the HCM IPC Adapter and ROS IPC Bridge.
 # It owns Flow descriptors, validation, Adapter control protocol, Unix Domain
-# Socket transport, request/response sessions, and fd RAII. It also builds the
-# C++ for the qrb_contracts schemas, so that both sides link one copy of it.
+# Socket transport, request/response sessions, and fd RAII. The Contract
+# messages come from the qrb_contracts_proto package, which it links publicly
+# so that both sides use one copy of them.
 #
-# Exported targets: qrb_ros_adapter::runtime, qrb_ros_adapter::contracts_proto.
+# Exported target: qrb_ros_adapter::runtime.
 # -----------------------------------------------------------------------------
 cmake_minimum_required(VERSION 3.16)
 project(qrb_ros_adapter_runtime VERSION 0.2.0 LANGUAGES CXX)
@@ -24,7 +25,12 @@ endif()
 # that `colcon test` expects.
 include(CTest)
 
-include(cmake/QrbContracts.cmake)
+include(cmake/QrbProtobuf.cmake)
+
+# C++ of the qrb_contracts schemas. It must be a shared library, so that the
+# HCM and ROS libraries loaded into one process register each Contract message
+# in the protobuf descriptor pool only once.
+find_package(qrb_contracts_proto REQUIRED CONFIG)
 
 # --- Adapter control protocol ------------------------------------------------
 
@@ -62,6 +68,7 @@ qrb_ros_adapter_generate_ipc_proto_cpp(_control_srcs _control_hdrs v1/ipc_contro
 # --- Runtime library ---------------------------------------------------------
 
 add_library(qrb_ros_adapter_runtime SHARED
+  source/contract_time.cpp
   source/contract_validation.cpp
   source/status.cpp
   source/flow_types.cpp
@@ -86,7 +93,7 @@ target_include_directories(qrb_ros_adapter_runtime SYSTEM PUBLIC
   "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>")
 target_compile_features(qrb_ros_adapter_runtime PUBLIC cxx_std_17)
 target_link_libraries(qrb_ros_adapter_runtime PUBLIC
-  qrb_contracts_proto
+  qrb_contracts_proto::qrb_contracts_proto
   protobuf::libprotobuf-lite)
 target_compile_options(qrb_ros_adapter_runtime PRIVATE -w)
 set_target_properties(qrb_ros_adapter_runtime PROPERTIES
@@ -105,7 +112,7 @@ install(DIRECTORY "${_proto_gen_root}/" DESTINATION include/${PROJECT_NAME}
 install(DIRECTORY proto/ DESTINATION share/${PROJECT_NAME}/proto
   FILES_MATCHING PATTERN "*.proto")
 
-install(TARGETS qrb_ros_adapter_runtime qrb_contracts_proto
+install(TARGETS qrb_ros_adapter_runtime
   EXPORT ${PROJECT_NAME}Targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

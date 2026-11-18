@@ -15,7 +15,6 @@
 #include <sensor_msgs/msg/point_field.hpp>
 
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/point_cloud_ros_converter.hpp"
-#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/ros_contract_time.hpp"
 
 using namespace qrb::adapter;
 
@@ -86,7 +85,9 @@ TEST(PointCloudRosConverter, MapsMetadataBindsTheDmaBufAndRejectsWhatItCannotBac
   PointCloudRosContract contract;
   RosToContractPayload outbound;
   ASSERT_TRUE(PointCloudRosConversion::RosToContract(source, contract, outbound));
-  EXPECT_EQ(contract.timestamp_ns(), 100 * kNanosPerSecond + 500);
+  EXPECT_EQ(contract.header().stamp().sec(), 100);
+  EXPECT_EQ(contract.header().stamp().nanosec(), 500u);
+  EXPECT_EQ(contract.header().frame_id(), "lidar");
   EXPECT_EQ(contract.row_step(), kCloudBytes);
   ASSERT_EQ(contract.fields_size(), 8);
   EXPECT_EQ(contract.fields(7).datatype(), sensor_proto::POINT_FIELD_TYPE_FLOAT64);

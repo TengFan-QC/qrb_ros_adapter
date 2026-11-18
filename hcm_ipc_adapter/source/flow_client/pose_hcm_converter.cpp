@@ -4,6 +4,7 @@
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_hcm_converter.hpp"
 
 #include "qrb/contract/geometry/v1/pose_with_covariance_stamped.pb.h"
+#include "qrb_ros_adapter/ipc_runtime/contract_time.hpp"
 #include "qrb_ros_adapter/ipc_runtime/contract_validation.hpp"
 
 namespace qrb::adapter
@@ -20,11 +21,19 @@ ConversionResult ConvertContractToHcm<PoseHcmContract, PoseHcmDescriptor>(
   ConversionResult validation = ValidatePoseWithCovarianceStamped(pose);
   if (!validation)
     return validation;
+  if (pose.header().frame_id().size() > QRB::Memory::QRB_FRAME_ID_MAX_LEN)
+    return ConversionResult::Failure("frame_id is longer than the HCM Pose descriptor holds");
 
-  descriptor.timestampNs = pose.timestamp_ns();
-  descriptor.frameId = pose.frame_id();
+  std::uint64_t timestampNs = 0;
+  ConversionResult time = ContractTimeToNanos(pose.header().stamp(), timestampNs);
+  if (!time)
+    return time;
 
-  const auto & value = pose.pose_with_covariance();
+  if (!AssignHcmString(pose.header().frame_id(), descriptor.frameId))
+    return ConversionResult::Failure("frame_id does not fit the HCM Pose descriptor");
+  descriptor.timestampNs = timestampNs;
+
+  const auto & value = pose.pose();
   descriptor.poseWithCovariance.pose.position.x = value.pose().position().x();
   descriptor.poseWithCovariance.pose.position.y = value.pose().position().y();
   descriptor.poseWithCovariance.pose.position.z = value.pose().position().z();
@@ -45,9 +54,12 @@ ConversionResult ConvertHcmToContract<PoseHcmContract, PoseHcmDescriptor>(
     PoseHcmContract & pose)
 {
   pose.Clear();
-  pose.set_timestamp_ns(descriptor.timestampNs);
-  pose.set_frame_id(descriptor.frameId);
-  auto * value = pose.mutable_pose_with_covariance();
+  ConversionResult time =
+      NanosToContractTime(descriptor.timestampNs, *pose.mutable_header()->mutable_stamp());
+  if (!time)
+    return time;
+  pose.mutable_header()->set_frame_id(HcmStringToContract(descriptor.frameId));
+  auto * value = pose.mutable_pose();
   auto * position = value->mutable_pose()->mutable_position();
   position->set_x(descriptor.poseWithCovariance.pose.position.x);
   position->set_y(descriptor.poseWithCovariance.pose.position.y);

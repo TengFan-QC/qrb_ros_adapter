@@ -4,9 +4,9 @@
 # The ament package: one generic ROS Flow implementation whose typed factories
 # are generated from the shared Contract mapping list.
 #
-# The ROS-free IPC Runtime and the generated Contract C++ come from the
-# qrb_ros_adapter_runtime package; this package does not depend on QCNode or
-# the HCM IPC Adapter.
+# The ROS-free IPC Runtime comes from the qrb_ros_adapter_runtime package,
+# which also brings the qrb_contracts_proto messages; this package does not
+# depend on QCNode or the HCM IPC Adapter.
 #
 # The implementation has two cohesive submodules: Bridge Manager and ROS Flow
 # Bridge. Message converters are discovered automatically and linked into the
@@ -51,7 +51,7 @@ file(GLOB _qrb_ros_converter_sources CONFIGURE_DEPENDS
 
 add_library(qrb_ros_adapter_ros_flow_bridge SHARED
   source/flow_bridge/ros_flow_bridge_base.cpp
-  source/flow_bridge/ros_contract_time.cpp
+  source/flow_bridge/ros_contract_header.cpp
   source/flow_bridge/ros_dma_buffer_pool.cpp
   ${_qrb_ros_converter_sources})
 
@@ -59,15 +59,16 @@ target_include_directories(qrb_ros_adapter_ros_flow_bridge PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include>")
 
+# The runtime brings qrb_contracts_proto::qrb_contracts_proto.
 target_link_libraries(qrb_ros_adapter_ros_flow_bridge PUBLIC
-  qrb_ros_adapter::runtime
-  qrb_ros_adapter::contracts_proto)
+  qrb_ros_adapter::runtime)
 
 set_target_properties(qrb_ros_adapter_ros_flow_bridge PROPERTIES
   EXPORT_NAME ros_flow_bridge)
 ament_target_dependencies(qrb_ros_adapter_ros_flow_bridge PUBLIC
   rclcpp
   builtin_interfaces
+  std_msgs
   geometry_msgs
   sensor_msgs
   ${QRB_ROS_TRANSPORT_DEPENDENCIES})
@@ -113,6 +114,7 @@ ament_export_dependencies(
   rclcpp
   rclcpp_components
   builtin_interfaces
+  std_msgs
   geometry_msgs
   sensor_msgs
   qrb_ros_adapter_runtime

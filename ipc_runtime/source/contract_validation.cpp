@@ -6,6 +6,8 @@
 #include <cmath>
 #include <limits>
 
+#include "qrb_ros_adapter/ipc_runtime/contract_time.hpp"
+
 namespace qrb::adapter
 {
 
@@ -61,16 +63,26 @@ ConversionResult ValidateFrameId(const std::string & frameId)
   return ConversionResult::Success();
 }
 
+ConversionResult ValidateHeader(const qrb::contract::common::v1::Header & header)
+{
+  ConversionResult frameId = ValidateFrameId(header.frame_id());
+  if (!frameId)
+    return frameId;
+  if (header.stamp().nanosec() >= kNanosPerSecond)
+    return Fail("header.stamp.nanosec must be below one second");
+  return ConversionResult::Success();
+}
+
 ConversionResult ValidatePoseWithCovarianceStamped(
     const qrb::contract::geometry::v1::PoseWithCovarianceStamped & pose)
 {
-  ConversionResult frameId = ValidateFrameId(pose.frame_id());
-  if (!frameId)
-    return frameId;
-  if (!pose.has_pose_with_covariance())
-    return Fail("pose_with_covariance is required");
+  ConversionResult header = ValidateHeader(pose.header());
+  if (!header)
+    return header;
+  if (!pose.has_pose())
+    return Fail("pose is required");
 
-  const auto & value = pose.pose_with_covariance();
+  const auto & value = pose.pose();
   if (!value.has_pose() || !IsFinitePose(value.pose()))
     return Fail("pose contains missing or non-finite values");
   const auto & orientation = value.pose().orientation();
@@ -89,9 +101,9 @@ ConversionResult ValidatePoseWithCovarianceStamped(
 ConversionResult ValidatePointCloud2(const qrb::contract::sensor::v1::PointCloud2 & cloud,
     std::uint64_t externalPayloadSize)
 {
-  ConversionResult frameId = ValidateFrameId(cloud.frame_id());
-  if (!frameId)
-    return frameId;
+  ConversionResult header = ValidateHeader(cloud.header());
+  if (!header)
+    return header;
   if (cloud.height() == 0 || cloud.width() == 0)
     return Fail("point cloud dimensions must be non-zero");
   if (cloud.point_step() == 0)

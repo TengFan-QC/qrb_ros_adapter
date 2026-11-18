@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 
+#include "qrb/contract/common/v1/header.pb.h"
 #include "qrb/contract/geometry/v1/pose_with_covariance_stamped.pb.h"
 #include "qrb/contract/sensor/v1/point_cloud2.pb.h"
 #include "qrb_ros_adapter/ipc_runtime/contract_limits.hpp"
@@ -16,6 +17,9 @@ namespace qrb::adapter
 {
 
 ConversionResult ValidateFrameId(const std::string & frameId);
+
+/** @brief Checks `frame_id` and that `stamp.nanosec` is below one second. */
+ConversionResult ValidateHeader(const qrb::contract::common::v1::Header & header);
 
 ConversionResult ValidatePoseWithCovarianceStamped(
     const qrb::contract::geometry::v1::PoseWithCovarianceStamped & pose);

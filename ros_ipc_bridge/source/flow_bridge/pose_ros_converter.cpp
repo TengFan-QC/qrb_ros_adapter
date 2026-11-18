@@ -4,7 +4,7 @@
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/pose_ros_converter.hpp"
 
 #include "qrb_ros_adapter/ipc_runtime/contract_validation.hpp"
-#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/ros_contract_time.hpp"
+#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/ros_contract_header.hpp"
 
 namespace qrb::adapter
 {
@@ -12,17 +12,9 @@ namespace qrb::adapter
 ConversionResult PoseRosConversion::RosToContract(const PoseRosMessage & source,
     PoseRosContract & target)
 {
-  std::uint64_t timestampNs = 0;
-  ConversionResult time = StampToContractNanos(source.header.stamp, timestampNs);
-  if (!time) {
-    return ConversionResult::Failure(
-        "header.stamp cannot be represented as timestamp_ns: " + time.Diagnostic());
-  }
-
   target.Clear();
-  target.set_timestamp_ns(timestampNs);
-  target.set_frame_id(source.header.frame_id);
-  auto * value = target.mutable_pose_with_covariance();
+  HeaderToContract(source.header, *target.mutable_header());
+  auto * value = target.mutable_pose();
   auto * position = value->mutable_pose()->mutable_position();
   position->set_x(source.pose.pose.position.x);
   position->set_y(source.pose.pose.position.y);
@@ -45,14 +37,9 @@ ConversionResult PoseRosConversion::ContractToRos(const PoseRosContract & source
   if (!validation)
     return validation;
 
-  ConversionResult time = ContractNanosToStamp(source.timestamp_ns(), target.header.stamp);
-  if (!time) {
-    return ConversionResult::Failure(
-        "timestamp_ns cannot be represented as a ROS stamp: " + time.Diagnostic());
-  }
-  target.header.frame_id = source.frame_id();
+  HeaderToRos(source.header(), target.header);
 
-  const auto & value = source.pose_with_covariance();
+  const auto & value = source.pose();
   target.pose.pose.position.x = value.pose().position().x();
   target.pose.pose.position.y = value.pose().position().y();
   target.pose.pose.position.z = value.pose().position().z();

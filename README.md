@@ -14,7 +14,8 @@ QRB ROS Adapter bridges Contract messages between HCM and ROS 2 over Unix
 Domain Sockets. The HCM IPC Adapter is a standard synchronous QCNode; the ROS
 IPC Bridge creates one ROS Flow Bridge for each Flow an Adapter registers.
 
-- `ipc_runtime`: IPC definitions, transport and the generated Contract C++.
+- `ipc_runtime`: IPC definitions, transport and Contract validation over the
+  `qrb_contracts_proto` messages.
 - `hcm_ipc_adapter`: the IPC Adapter Node. Needs QCNode, not ROS.
 - `ros_ipc_bridge`: the Bridge Manager and ROS Flow Bridge. Needs ROS, not
   QCNode.

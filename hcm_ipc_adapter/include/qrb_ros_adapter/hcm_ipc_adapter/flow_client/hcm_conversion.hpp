@@ -5,8 +5,12 @@
 #define QRB_ROS_ADAPTER_HCM_IPC_ADAPTER_FLOW_CLIENT_HCM_CONVERSION_HPP
 
 #include <cstddef>
+#include <cstdint>
+#include <string>
 
+#include "QC/Common/QCString.hpp"
 #include "qrb_ros_adapter/ipc_runtime/conversion_result.hpp"
+
 namespace qrb::adapter
 {
 
@@ -16,6 +20,21 @@ struct DmaBufView
   const void * data{nullptr};
   std::size_t size{0};
 };
+
+/** @brief Copy a Contract string into a fixed-size descriptor string; fails if it does not fit. */
+template <std::size_t N>
+bool AssignHcmString(const std::string & source, QC::QCString<N> & target)
+{
+  return source.size() <= N && target.Assign(source.data(),
+                                   static_cast<std::uint32_t>(source.size())) == QC::QC_STATUS_OK;
+}
+
+/** @brief Read a fixed-size descriptor string back as a Contract string. */
+template <std::size_t N>
+std::string HcmStringToContract(const QC::QCString<N> & source)
+{
+  return std::string(source.Data(), source.Size());
+}
 
 /** @brief Convert a Contract and optional external payload to an HCM descriptor. */
 template <typename ContractT, typename DescriptorT>
