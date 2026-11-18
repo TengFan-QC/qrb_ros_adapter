@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "QC/Infras/Memory/BufferDescriptor.hpp"
+#include "QC/Node/Ifs/QCNodeFactory.hpp"
 #include "hcm_probe_node.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_converters.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/ipc_adapter_node/hcm_ipc_adapter_node.hpp"
@@ -577,7 +578,8 @@ public:
               params_.rate, U64(params_.payloadBytes), U64(params_.bufferBytes), params_.duration,
               params_.warmup));
     }
-    if (adapter::CreateHcmIpcAdapterNode(QC::QC_NODE_TYPE_CUSTOM_0, adapter_) != QC::QC_STATUS_OK ||
+    if (QC::Node::QCNodeFactory::CreateNode(QC_NODE_TYPE_IPC_ADAPTER, adapter_) !=
+            QC::QC_STATUS_OK ||
         CreateHcmStreamProbeNode(kHcmStreamProbeNodeType, probe_) != QC::QC_STATUS_OK)
       return "cannot create the nodes";
     std::string error;

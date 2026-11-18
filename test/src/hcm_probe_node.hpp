@@ -40,8 +40,11 @@
 namespace qrb::adapter::stream_probe
 {
 
-/** @brief The node type CreateHcmStreamProbeNode() accepts; the Adapter is CUSTOM_0. */
-constexpr QC::QCNodeType_e kHcmStreamProbeNodeType = QC::QC_NODE_TYPE_CUSTOM_1;
+/**
+ * @brief The node type CreateHcmStreamProbeNode() accepts. In libQCNode.so the Demo
+ * node is CUSTOM_0 and the IPC Adapter Node is CUSTOM_1.
+ */
+constexpr QC::QCNodeType_e kHcmStreamProbeNodeType = QC::QC_NODE_TYPE_CUSTOM_2;
 
 /** @brief What GetMonitoringIfs().Place() copies out. Reset by Initialize(). */
 struct HcmStreamProbeMonitoringData : public QC::QCNodeMonitoringBase_t

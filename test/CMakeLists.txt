@@ -6,6 +6,7 @@
 #                        qrb_ros_adapter_stream_probe, with terminal_ui
 #   src/ros_probe_*      RosStreamProbeNode (a component) and ros_stream_probe_node
 #   config/              the default parameter file and Adapter static configs
+#   scripts/             qrb_ros_adapter_stream_test.sh, one side of a run per terminal
 # The HCM side links no ROS, the ROS side no QCNode.
 # -----------------------------------------------------------------------------
 cmake_minimum_required(VERSION 3.16)
@@ -72,6 +73,7 @@ install(TARGETS qrb_ros_adapter_hcm_stream_probe_node qrb_ros_adapter_ros_stream
   RUNTIME DESTINATION bin)
 # The HCM host has no ROS dependency, so it goes on PATH rather than behind `ros2 run`.
 install(TARGETS qrb_ros_adapter_stream_probe RUNTIME DESTINATION bin)
+install(PROGRAMS scripts/qrb_ros_adapter_stream_test.sh DESTINATION bin)
 install(TARGETS ros_stream_probe_node RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/probe_configs)
 

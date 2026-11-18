@@ -16,6 +16,9 @@
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_flow_client.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/ipc_adapter_node/hcm_ipc_adapter_config.hpp"
 
+/** QCNodeFactory node type of the IPC Adapter Node, which is built into libQCNode.so. */
+#define QC_NODE_TYPE_IPC_ADAPTER QC::QC_NODE_TYPE_CUSTOM_1
+
 namespace qrb::adapter
 {
 
@@ -130,10 +133,6 @@ private:
   HcmFlowClient client_;
   Status flowFailure_{Status::kOk};  // first fatal status since the Session was set up
 };
-
-/** @brief NodeFactoryFn-compatible factory for the host. */
-QC::QCStatus_e CreateHcmIpcAdapterNode(QC::QCNodeType_e type,
-    std::unique_ptr<QC::QCNodeIfs> & outNode);
 
 }  // namespace qrb::adapter
 
