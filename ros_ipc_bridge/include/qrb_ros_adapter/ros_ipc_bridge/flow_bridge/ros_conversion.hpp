@@ -52,8 +52,8 @@ public:
 
 private:
   std::shared_ptr<lib_mem_dmabuf::DmaBuffer> buffer_;
-  std::uint64_t size_{ 0 };
-  std::uint64_t offset_{ 0 };
+  std::uint64_t size_{0};
+  std::uint64_t offset_{0};
 };
 
 /** @brief Destination selected by a Contract-to-ROS DMA conversion. */
@@ -97,9 +97,9 @@ public:
   }
 
 private:
-  std::shared_ptr<lib_mem_dmabuf::DmaBuffer> * destination_{ nullptr };
-  std::uint64_t availableCapacity_{ 0 };
-  std::uint64_t size_{ 0 };
+  std::shared_ptr<lib_mem_dmabuf::DmaBuffer> * destination_{nullptr};
+  std::uint64_t availableCapacity_{0};
+  std::uint64_t size_{0};
 };
 
 /**

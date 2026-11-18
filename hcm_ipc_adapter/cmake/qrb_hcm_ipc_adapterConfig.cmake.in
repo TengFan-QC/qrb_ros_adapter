@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(qrb_ros_adapter_runtime @PROJECT_VERSION@)
+find_dependency(nlohmann_json)
+find_dependency(qrb_contracts)
+
+# Recreate QCNode::QCNode, which the exported library links.
+include("${CMAKE_CURRENT_LIST_DIR}/QrbQcNode.cmake")
+
+include("${CMAKE_CURRENT_LIST_DIR}/qrb_hcm_ipc_adapterTargets.cmake")
+
+check_required_components(qrb_hcm_ipc_adapter)

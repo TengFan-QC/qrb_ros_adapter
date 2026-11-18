@@ -47,7 +47,7 @@ Status ValidateFlowConfig(const FlowConfig & config,
     std::string & diagnostic)
 {
   if (config.flowId.empty()) {
-    diagnostic += "flow_id must not be empty; ";
+    diagnostic += "flow id (QCNode name) must not be empty; ";
     return Status::kInvalidArgument;
   }
 
@@ -66,19 +66,9 @@ Status ValidateFlowConfig(const FlowConfig & config,
     return Status::kInvalidArgument;
   }
 
-  if (config.requestTimeoutMs < kMinRequestTimeoutMs ||
-      config.requestTimeoutMs > kMaxRequestTimeoutMs) {
-    diagnostic += "request_timeout_ms " + std::to_string(config.requestTimeoutMs) + " outside [" +
-                  std::to_string(kMinRequestTimeoutMs) + ", " +
-                  std::to_string(kMaxRequestTimeoutMs) + "]; ";
-    return Status::kInvalidArgument;
-  }
-
-  if (config.sampleTimeoutMs < kMinSampleTimeoutMs ||
-      config.sampleTimeoutMs > kMaxSampleTimeoutMs) {
-    diagnostic += "sample_timeout_ms " + std::to_string(config.sampleTimeoutMs) + " outside [" +
-                  std::to_string(kMinSampleTimeoutMs) + ", " + std::to_string(kMaxSampleTimeoutMs) +
-                  "]; ";
+  if (config.timeoutMs < kMinTimeoutMs || config.timeoutMs > kMaxTimeoutMs) {
+    diagnostic += "timeout_ms " + std::to_string(config.timeoutMs) + " outside [" +
+                  std::to_string(kMinTimeoutMs) + ", " + std::to_string(kMaxTimeoutMs) + "]; ";
     return Status::kInvalidArgument;
   }
 
@@ -90,20 +80,20 @@ Status ValidateFlowConfig(const FlowConfig & config,
     return Status::kInvalidArgument;
   }
 
-  switch (config.qosProfile) {
-    case QosProfile::kRosDefault:
-    case QosProfile::kReliable:
-    case QosProfile::kSensorData:
-    case QosProfile::kTransientLocal:
-      break;
-    default:
-      diagnostic += "qos_profile is not supported; ";
-      return Status::kInvalidArgument;
+  const QosProfile & qos = config.qosProfile;
+  if (qos.reliability != QosReliability::kReliable &&
+      qos.reliability != QosReliability::kBestEffort) {
+    diagnostic += "qos_profile.reliability is not supported; ";
+    return Status::kInvalidArgument;
   }
-
-  if (config.qosDepth > kMaxQosDepth) {
-    diagnostic += "qos_depth " + std::to_string(config.qosDepth) + " outside [0, " +
-                  std::to_string(kMaxQosDepth) + "]; ";
+  if (qos.durability != QosDurability::kVolatile &&
+      qos.durability != QosDurability::kTransientLocal) {
+    diagnostic += "qos_profile.durability is not supported; ";
+    return Status::kInvalidArgument;
+  }
+  if (qos.depth < kMinQosDepth || qos.depth > kMaxQosDepth) {
+    diagnostic += "qos_profile.depth " + std::to_string(qos.depth) + " outside [" +
+                  std::to_string(kMinQosDepth) + ", " + std::to_string(kMaxQosDepth) + "]; ";
     return Status::kInvalidArgument;
   }
 

@@ -90,7 +90,7 @@ Status DecodeTransportHeader(const std::uint8_t * data, std::size_t len, Transpo
   if (header.magic != kTransportMagic)
     return Status::kProtocolError;
   // Checked before anything else field-specific: a version disagreement is
-  // the one failure a peer can act on (HLD §18), so it must not be reported
+  // the one failure a peer can act on, so it must not be reported
   // as a generic protocol error.
   if (header.protocolVersion != kTransportVersion)
     return Status::kVersionMismatch;

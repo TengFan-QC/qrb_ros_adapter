@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>qrb_ros_adapter_runtime</name>
+  <version>0.2.0</version>
+  <description>
+    IPC Runtime of qrb_ros_adapter, shared by the HCM IPC Adapter and the ROS
+    IPC Bridge: Flow model, Adapter control protocol, Unix Domain Socket
+    transport and the C++ generated from the qrb_contracts schemas. Depends on
+    neither ROS nor QCNode.
+  </description>
+  <maintainer email="noreply@qualcomm.com">Qualcomm Technologies, Inc.</maintainer>
+  <license>BSD-3-Clause-Clear</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+  <buildtool_depend>protobuf-compiler</buildtool_depend>
+
+  <depend>protobuf-dev</depend>
+
+  <test_depend>gtest</test_depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

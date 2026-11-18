@@ -30,31 +30,69 @@ const char * ToString(Direction direction)
   return "unknown";
 }
 
-const char * ToString(QosProfile profile)
+const char * ToString(QosReliability reliability)
 {
-  switch (profile) {
-    case QosProfile::kRosDefault:
-      return "ros_default";
-    case QosProfile::kReliable:
+  switch (reliability) {
+    case QosReliability::kReliable:
       return "reliable";
-    case QosProfile::kSensorData:
-      return "sensor_data";
-    case QosProfile::kTransientLocal:
+    case QosReliability::kBestEffort:
+      return "best_effort";
+  }
+  return "unknown";
+}
+
+const char * ToString(QosDurability durability)
+{
+  switch (durability) {
+    case QosDurability::kVolatile:
+      return "volatile";
+    case QosDurability::kTransientLocal:
       return "transient_local";
   }
   return "unknown";
 }
 
-bool ParseQosProfile(std::string_view text, QosProfile & out)
+std::int64_t ToDirectionCode(Direction direction)
 {
-  if (text == "ros_default")
-    out = QosProfile::kRosDefault;
-  else if (text == "reliable")
-    out = QosProfile::kReliable;
-  else if (text == "sensor_data")
-    out = QosProfile::kSensorData;
+  switch (direction) {
+    case Direction::kHcmToRos:
+      return kDirectionCodeHcmToRos;
+    case Direction::kRosToHcm:
+      return kDirectionCodeRosToHcm;
+    case Direction::kUnspecified:
+      break;
+  }
+  return -1;
+}
+
+bool ParseDirectionCode(std::int64_t code, Direction & out)
+{
+  if (code == kDirectionCodeHcmToRos)
+    out = Direction::kHcmToRos;
+  else if (code == kDirectionCodeRosToHcm)
+    out = Direction::kRosToHcm;
+  else
+    return false;
+  return true;
+}
+
+bool ParseQosReliability(std::string_view text, QosReliability & out)
+{
+  if (text == "reliable")
+    out = QosReliability::kReliable;
+  else if (text == "best_effort")
+    out = QosReliability::kBestEffort;
+  else
+    return false;
+  return true;
+}
+
+bool ParseQosDurability(std::string_view text, QosDurability & out)
+{
+  if (text == "volatile")
+    out = QosDurability::kVolatile;
   else if (text == "transient_local")
-    out = QosProfile::kTransientLocal;
+    out = QosDurability::kTransientLocal;
   else
     return false;
   return true;

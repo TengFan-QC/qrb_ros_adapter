@@ -6,7 +6,6 @@
 
 #include <google/protobuf/message_lite.h>
 
-#include <chrono>
 #include <rclcpp/node.hpp>
 #include <string>
 
@@ -32,11 +31,10 @@ public:
   virtual Status Open(rclcpp::Node & node, const FlowConfig & config, std::string & diagnostic) = 0;
   virtual void Close() noexcept = 0;
 
+  /** @brief Take the fresh sample without waiting; kNoData if there is none. */
   virtual Status Fetch(google::protobuf::MessageLite & target,
       OutboundPayload & outPayload,
-      std::string & diagnostic,
-      std::chrono::milliseconds sampleTimeout) = 0;
-  virtual void CancelPendingFetch() noexcept = 0;
+      std::string & diagnostic) = 0;
   virtual Status Publish(const google::protobuf::MessageLite & source,
       InboundPayload & payload,
       std::string & diagnostic) = 0;
@@ -54,15 +52,14 @@ class TypedRosFlowHandler : public RosFlowHandler
 public:
   Status Fetch(google::protobuf::MessageLite & target,
       OutboundPayload & outPayload,
-      std::string & diagnostic,
-      std::chrono::milliseconds sampleTimeout) final
+      std::string & diagnostic) final
   {
     auto * contract = dynamic_cast<ContractT *>(&target);
     if (contract == nullptr) {
       diagnostic += "ROS handler received an unexpected Contract target type; ";
       return Status::kInternalError;
     }
-    return FetchTyped(*contract, outPayload, diagnostic, sampleTimeout);
+    return FetchTyped(*contract, outPayload, diagnostic);
   }
 
   Status Publish(const google::protobuf::MessageLite & source,
@@ -80,8 +77,7 @@ public:
 protected:
   virtual Status FetchTyped(ContractT & target,
       OutboundPayload & outPayload,
-      std::string & diagnostic,
-      std::chrono::milliseconds sampleTimeout) = 0;
+      std::string & diagnostic) = 0;
   virtual Status PublishTyped(const ContractT & source,
       InboundPayload & payload,
       std::string & diagnostic) = 0;

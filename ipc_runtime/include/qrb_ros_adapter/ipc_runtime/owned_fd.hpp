@@ -13,13 +13,12 @@ namespace qrb::adapter
  * @brief Move-only owner of one file descriptor.
  *
  * Every fd that crosses the IPC boundary via SCM_RIGHTS is received into one
- * of these. The receiving side owns the fd the kernel just installed, and the
- * Definition of Done requires fd lifecycle tests to pass -- which is far
- * easier to guarantee with an RAII owner than with the `if ( fd >= 0 )
- * ::close( fd )` sprinkled along every early-return path.
+ * of these. The receiving side owns the fd the kernel just installed; an RAII
+ * owner closes it on every early-return path, which an `if ( fd >= 0 )
+ * ::close( fd )` sprinkled along each of them does not guarantee.
  *
  * Deliberately has no Status/logging dependency: this is the lowest-level
- * low-level transport utility and is used by IpcEndpoint itself.
+ * transport utility and is used by IpcEndpoint itself.
  */
 class OwnedFd
 {
@@ -62,7 +61,7 @@ public:
   void Reset(int fd = -1);
 
 private:
-  int fd_{ -1 };
+  int fd_{-1};
 };
 
 }  // namespace qrb::adapter

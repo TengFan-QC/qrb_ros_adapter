@@ -12,33 +12,27 @@
 namespace qrb::adapter
 {
 
-/** Standard ROS 2 publisher/subscription QoS uses KEEP_LAST depth 10. */
-constexpr std::size_t kRosDefaultQosDepth = 10;
-
-/** Keep one spare slot beyond the default DDS queue depth. */
-constexpr int kDefaultRosDmaBufferPoolSize = 12;
-
-inline std::size_t ResolveQosDepth(std::uint32_t requested)
+/**
+ * ROS-owned DMA-BUFs of one HCM_TO_ROS Flow: the DDS queue, one buffer being
+ * copied into and one spare.
+ */
+inline std::size_t RosDmaBufferPoolSize(const QosProfile & profile)
 {
-  return requested == 0 ? kRosDefaultQosDepth : static_cast<std::size_t>(requested);
+  return static_cast<std::size_t>(profile.depth) + 2;
 }
 
 inline rclcpp::QoS MakeRosQos(const FlowConfig & config)
 {
-  rclcpp::QoS qos{ rclcpp::KeepLast(ResolveQosDepth(config.qosDepth)) };
-  switch (config.qosProfile) {
-    case QosProfile::kRosDefault:
-      break;
-    case QosProfile::kSensorData:
-      qos.best_effort().durability_volatile();
-      break;
-    case QosProfile::kTransientLocal:
-      qos.reliable().transient_local();
-      break;
-    case QosProfile::kReliable:
-      qos.reliable().durability_volatile();
-      break;
-  }
+  const QosProfile & profile = config.qosProfile;
+  rclcpp::QoS qos{rclcpp::KeepLast(profile.depth)};
+  if (profile.reliability == QosReliability::kBestEffort)
+    qos.best_effort();
+  else
+    qos.reliable();
+  if (profile.durability == QosDurability::kTransientLocal)
+    qos.transient_local();
+  else
+    qos.durability_volatile();
   return qos;
 }
 

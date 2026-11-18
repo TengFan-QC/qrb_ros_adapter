@@ -23,9 +23,9 @@ using RosFlowBridgeFactory = std::shared_ptr<RosFlowBridgeBase> (*)(const rclcpp
 /** @brief ROS-side implementation registered for one shared Contract Descriptor. */
 struct RosContractBinding
 {
-  const ContractDescriptor * descriptor{ nullptr };
+  const ContractDescriptor * descriptor{nullptr};
   std::string_view nodeName;
-  RosFlowBridgeFactory createBridge{ nullptr };
+  RosFlowBridgeFactory createBridge{nullptr};
 };
 
 std::size_t RosContractBindingCount();

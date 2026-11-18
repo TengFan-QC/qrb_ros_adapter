@@ -36,15 +36,16 @@ struct FlowTerminalEvent
 {
   std::string flowId;
   std::string instanceToken;
-  Status reason{ Status::kOk };
+  Status reason{Status::kOk};
   std::string diagnostic;
+  /** The HCM side closed the data Session: DeInitialize, or its process exited. */
+  bool peerClosed{false};
 };
 
 using FlowTerminalCallback = std::function<void(FlowTerminalEvent)>;
 
 /**
- * @brief Common node implementation for every generated typed ROS Flow
- * (HLD §9.2).
+ * @brief Common node implementation for every generated typed ROS Flow.
  *
  * The base owns:
  *   - the common ROS parameters and their validation
@@ -63,22 +64,9 @@ using FlowTerminalCallback = std::function<void(FlowTerminalEvent)>;
  * service thread accepts the single HCM client, completes the handshake and
  * serves frames. Publisher::publish() is safe to call from that thread.
  *
- * ### Message delivery on the ros_to_hcm direction
- *
- * A Flow Bridge's Subscription is a normal, callback-driven one -- not read with
- * `take()`. That is deliberate: `take()` reads only the middleware queue, and a
- * message delivered intra-process (exactly the qrb_ros_transport zero-copy input
- * path, HLD §12.3) never reaches it, arriving only through the executor's
- * callback dispatch. A `take()`-based bridge would therefore see nothing from an
- * intra-process publisher and report No Data forever despite a correctly
- * configured Flow.
- *
- * So the Subscription callback, dispatched by the shared Executor, stores the
- * newest message in a
- * LatestSample slot, and the service thread reads that slot instead of the
- * subscription. See latest_sample.hpp for why only the newest sample is kept.
- * This means the Flow Bridge node must actually be spinning on the shared
- * executor for ros_to_hcm delivery to happen at all.
+ * On ros_to_hcm, the Subscription callback stores the newest message in a
+ * LatestSample slot that the service thread reads (see latest_sample.hpp), so
+ * the node must be spinning on the shared executor for delivery to happen.
  *
  * A configuration or Descriptor failure makes construction throw.
  */
@@ -114,33 +102,34 @@ private:
       const std::vector<std::uint8_t> & payload,
       std::vector<OwnedFd> & fds);
 
-  /** @brief Record a terminal failure, stop serving and notify the Manager. */
-  void Fail(Status reason, const std::string & diagnostic);
+  /** @brief Record a terminal failure, stop serving and notify the Manager.
+   * `peerClosed` marks the HCM side ending the Session, logged as INFO. */
+  void Fail(Status reason, const std::string & diagnostic, bool peerClosed = false);
 
   /** @brief Queue one terminal event without performing cleanup on this thread. */
-  void NotifyTerminal(Status reason, const std::string & diagnostic);
+  void NotifyTerminal(Status reason, const std::string & diagnostic, bool peerClosed);
 
   FlowConfig config_;
   FlowRegistration registration_;
-  const ContractDescriptor * descriptor_{ nullptr };
+  const ContractDescriptor * descriptor_{nullptr};
   IpcSession session_;
   std::unique_ptr<google::protobuf::MessageLite> contractMessage_;
   std::string diagnostic_;
-  std::atomic<Status> terminalReason_{ Status::kOk };
-  std::atomic<bool> terminalNotified_{ false };
+  std::atomic<Status> terminalReason_{Status::kOk};
+  std::atomic<bool> terminalNotified_{false};
   FlowTerminalCallback terminalCallback_;
   std::unique_ptr<RosFlowHandler> handler_;
 
   std::thread serviceThread_;
-  std::atomic<bool> serviceRunning_{ false };
+  std::atomic<bool> serviceRunning_{false};
 
   /** Guards Close() against running its teardown twice. */
-  bool stopped_{ false };
+  bool stopped_{false};
 
-  std::uint64_t framesIn_{ 0 };
-  std::uint64_t framesOut_{ 0 };
-  std::uint64_t noDataResponses_{ 0 };
-  std::uint64_t conversionErrors_{ 0 };
+  std::uint64_t framesIn_{0};
+  std::uint64_t framesOut_{0};
+  std::uint64_t noDataResponses_{0};
+  std::uint64_t conversionErrors_{0};
 };
 
 }  // namespace qrb::adapter

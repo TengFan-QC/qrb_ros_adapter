@@ -40,8 +40,9 @@ public:
     } else {
       publisher_ = node.create_publisher<RosMessageT>(config.rosTopic, qos);
     }
-    RCLCPP_INFO(node.get_logger(), "ROS endpoint QoS: profile=%s, depth=%zu",
-        ToString(config.qosProfile), ResolveQosDepth(config.qosDepth));
+    RCLCPP_INFO(node.get_logger(), "ROS endpoint QoS: %s, %s, depth=%u",
+        ToString(config.qosProfile.reliability), ToString(config.qosProfile.durability),
+        config.qosProfile.depth);
     return Status::kOk;
   }
 
@@ -52,19 +53,16 @@ public:
     publisher_.reset();
   }
 
-  void CancelPendingFetch() noexcept override { latest_.Shutdown(); }
-
 protected:
   Status FetchTyped(ContractT & target,
       OutboundPayload & outPayload,
-      std::string & diagnostic,
-      std::chrono::milliseconds sampleTimeout) override
+      std::string & diagnostic) override
   {
     if (subscription_ == nullptr)
       return Status::kBadState;
 
     RosMessageT message;
-    if (!latest_.WaitAndTake(message, sampleTimeout))
+    if (!latest_.Take(message))
       return Status::kNoData;
 
     outPayload = OutboundPayload{};

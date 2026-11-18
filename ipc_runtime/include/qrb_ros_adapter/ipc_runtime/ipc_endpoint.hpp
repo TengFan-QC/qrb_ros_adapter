@@ -28,7 +28,7 @@ namespace qrb::adapter
  * listens and HCM connects. After Accept()/Connect() there is exactly one peer
  * for this endpoint's lifetime. This class never
  * retries or reconnects once connected; connection recovery policy belongs to
- * the runtime layer (HLD §5.5).
+ * the runtime layer.
  *
  * Not copyable: owns raw fds.
  */
@@ -74,9 +74,7 @@ public:
   /**
    * @brief Client side: one non-blocking connect attempt.
    *
-   * Exactly one attempt, no sleeping, no retry loop. A runtime may schedule
-   * the initial attempt outside its constructor, but a failed established
-   * Flow is never reconnected by this endpoint.
+   * Exactly one attempt, no sleeping, no retry loop.
    *
    * @return kOk (connected), kTimeout (the peer is not listening), or
    *         kResourceError.
@@ -129,6 +127,10 @@ public:
       std::vector<OwnedFd> & fdsOut,
       std::chrono::milliseconds timeout);
 
+  /** @brief True when the last RecvFrame() failed because the peer closed the
+   * connection (EOF or hangup), not because of a socket error. */
+  bool PeerClosed() const noexcept { return peerClosed_; }
+
   /** @brief Close the connection, the listening socket if still open, and
    * unlink the socket file if this endpoint created it. Idempotent. */
   void Close() noexcept;
@@ -136,10 +138,11 @@ public:
 private:
   Status WaitAndAccept(std::chrono::milliseconds timeout, int wakeFd, bool & woken, int & connOut);
 
-  int fd_{ -1 };        // the connected (post accept/connect) socket
-  int listenFd_{ -1 };  // only set between Listen() and Accept()
+  int fd_{-1};        // the connected (post accept/connect) socket
+  int listenFd_{-1};  // only set between Listen() and Accept()
   std::string socketPath_;
-  bool isServer_{ false };
+  bool isServer_{false};
+  bool peerClosed_{false};
   /** Reused recvmsg storage; one endpoint is consumed by one Session thread. */
   std::vector<std::uint8_t> receiveBuffer_;
 };

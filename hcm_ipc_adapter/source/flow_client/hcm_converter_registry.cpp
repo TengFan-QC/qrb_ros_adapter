@@ -15,26 +15,26 @@ namespace
 {
 
 constexpr std::size_t kCustomDescriptorCapacity =
-    static_cast<std::size_t>(QC::QC_BUFFER_TYPE_CUSTOM_END) -
-    static_cast<std::size_t>(QC::QC_BUFFER_TYPE_CUSTOM_BEGIN);
+    static_cast<std::size_t>(kHcmCustomDescriptorTypeEnd) -
+    static_cast<std::size_t>(kHcmCustomDescriptorTypeBegin);
 
-static_assert(QC::QC_BUFFER_TYPE_CUSTOM_BEGIN < QC::QC_BUFFER_TYPE_CUSTOM_END);
-static_assert(QC::QC_BUFFER_TYPE_CUSTOM_END <= QC::QC_BUFFER_TYPE_MAX);
+static_assert(kHcmCustomDescriptorTypeBegin < kHcmCustomDescriptorTypeEnd);
+static_assert(kHcmCustomDescriptorTypeEnd <= QC::QC_BUFFER_TYPE_MAX);
 static_assert(ContractDescriptorCount() <= kCustomDescriptorCapacity,
-    "registered Contracts exceed the GF custom descriptor type capacity");
+    "registered Contracts exceed the QCNode custom descriptor type capacity");
 
 std::array<HcmContractBinding, ContractDescriptorCount()> MakeHcmBindings()
 {
-  std::array<HcmContractBinding, ContractDescriptorCount()> bindings{ {
+  std::array<HcmContractBinding, ContractDescriptorCount()> bindings{{
 #define QRB_CONTRACT_MAPPING(Id, TypeName, Payload, ContractT, DescriptorT, ...)                   \
   MakeHcmContractBinding<ContractT, DescriptorT>(),
 #include "qrb_ros_adapter/ipc_runtime/contract_mappings.def"
 #undef QRB_CONTRACT_MAPPING
-  } };
+  }};
 
   for (std::size_t index = 0; index < bindings.size(); ++index) {
     bindings[index].descriptorType = static_cast<QC::QCBufferType_e>(
-        static_cast<std::size_t>(QC::QC_BUFFER_TYPE_CUSTOM_BEGIN) + index);
+        static_cast<std::size_t>(kHcmCustomDescriptorTypeBegin) + index);
   }
   return bindings;
 }

@@ -14,7 +14,7 @@ namespace qrb::adapter
 namespace ipc_proto = ::qrb::adapter::ipc::v1;
 
 /**
- * @brief Map a Status onto the wire StatusCode (HLD §6.5).
+ * @brief Map a Status onto the wire StatusCode.
  *
  * Local-only Status values collapse onto the closest wire code. Transport
  * version mismatch and timeout map to PROTOCOL_ERROR; kBadState maps to
@@ -27,7 +27,7 @@ ipc_proto::StatusCode ToProtoStatusCode(Status status);
  *
  * An unrecognized or unspecified code becomes kProtocolError rather than being
  * silently treated as success -- control logic must depend only on the stable
- * enum values (HLD §6.5).
+ * enum values.
  */
 Status FromProtoStatusCode(ipc_proto::StatusCode code);
 
@@ -37,9 +37,12 @@ ipc_proto::Direction ToProtoDirection(Direction direction);
 /** @brief Map a wire Direction to Direction (unknown -> kUnspecified). */
 Direction FromProtoDirection(ipc_proto::Direction direction);
 
-/** @brief Map the restricted QoS profile to and from its wire enum. */
-ipc_proto::QosProfile ToProtoQosProfile(QosProfile profile);
-QosProfile FromProtoQosProfile(ipc_proto::QosProfile profile);
+/**
+ * @brief Map the QoS profile to and from its wire message. An unknown wire
+ * enum value becomes an out-of-range policy that ValidateFlowConfig rejects.
+ */
+void ToProtoQosProfile(const QosProfile & profile, ipc_proto::QosProfile & out);
+QosProfile FromProtoQosProfile(const ipc_proto::QosProfile & profile);
 
 }  // namespace qrb::adapter
 

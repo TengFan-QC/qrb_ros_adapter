@@ -14,11 +14,11 @@
 #include <filesystem>
 #include <rclcpp/utilities.hpp>
 #include <stdexcept>
+#include <system_error>
 #include <vector>
 
 #include "qrb_ros_adapter/ipc_runtime/contract_descriptor_registry.hpp"
 #include "qrb_ros_adapter/ipc_runtime/control_status.hpp"
-#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/ros_qos.hpp"
 #include "qrb_ros_adapter/ros_ipc_bridge/manager/ros_contract_registry.hpp"
 
 namespace qrb::adapter
@@ -26,32 +26,36 @@ namespace qrb::adapter
 
 namespace
 {
-constexpr std::chrono::milliseconds kBootstrapPollInterval{ 200 };
-constexpr std::chrono::milliseconds kBootstrapRequestTimeout{ 2000 };
+constexpr std::chrono::milliseconds kBootstrapPollInterval{200};
+constexpr std::chrono::milliseconds kBootstrapRequestTimeout{2000};
+constexpr std::size_t kMaxFlows = 32;
 }  // namespace
 
 RosBridgeManager::RosBridgeManager(std::shared_ptr<rclcpp::Executor> executor,
-    const rclcpp::NodeOptions & options)
-  : rclcpp::Node("qrb_ros_bridge_manager", options), executor_(std::move(executor))
+    const rclcpp::NodeOptions & options,
+    std::string bootstrapSocketPath)
+  : rclcpp::Node("qrb_ros_adapter_bridge_manager", options)
+  , executor_(std::move(executor))
+  , bootstrapSocketPath_(std::move(bootstrapSocketPath))
 {
   if (executor_ == nullptr)
     throw std::invalid_argument("executor must not be null");
-  bootstrapSocketPath_ = this->declare_parameter<std::string>(
-      "bootstrap_socket_path", "/run/qrb_ros_adapter/bootstrap.sock");
+  if (bootstrapSocketPath_.empty()) {
+    throw std::invalid_argument("bootstrap socket path must not be empty");
+  }
+  // Per-Flow data sockets live next to the bootstrap socket.
   flowSocketDirectory_ =
-      this->declare_parameter<std::string>("flow_socket_directory", "/run/qrb_ros_adapter/flows");
-  const int maxFlows = this->declare_parameter<int>("max_flows", 32);
-  const int rosDmaBufferPoolSize =
-      this->declare_parameter<int>("ros_dma_buffer_pool_size", kDefaultRosDmaBufferPoolSize);
-  if (bootstrapSocketPath_.empty() || flowSocketDirectory_.empty() || maxFlows <= 0 ||
-      rosDmaBufferPoolSize <= 0) {
-    throw std::invalid_argument("invalid ROS Bridge Manager parameters");
+      (std::filesystem::path(bootstrapSocketPath_).parent_path() / "flows").string();
+  std::error_code error;
+  std::filesystem::create_directories(flowSocketDirectory_, error);
+  if (error) {
+    std::string hint;
+    if (error == std::errc::permission_denied) {
+      hint = "; run the Bridge as root, or create the directory writable by its user";
+    }
+    throw std::runtime_error("failed to create Flow socket directory '" + flowSocketDirectory_ +
+                             "': " + error.message() + hint);
   }
-  if (!std::filesystem::is_directory(flowSocketDirectory_)) {
-    throw std::invalid_argument("flow_socket_directory must be created by the deployment system");
-  }
-  maxFlows_ = static_cast<std::size_t>(maxFlows);
-  rosDmaBufferPoolSize_ = rosDmaBufferPoolSize;
 
   terminalEventFd_.Reset(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
   if (!terminalEventFd_.IsValid()) {
@@ -75,13 +79,16 @@ void RosBridgeManager::Start()
     throw std::runtime_error(std::string("bootstrap listen failed: ") + ToString(listened));
   }
   bootstrapThread_ = std::thread(&RosBridgeManager::BootstrapLoop, this);
+  RCLCPP_INFO(get_logger(), "listening for Adapters on '%s'", bootstrapSocketPath_.c_str());
 }
 
 void RosBridgeManager::Stop()
 {
   const bool wasRunning = running_.exchange(false);
-  if (wasRunning)
+  if (wasRunning) {
     WakeManager();
+    RCLCPP_INFO(get_logger(), "stopping");
+  }
   if (bootstrapThread_.joinable())
     bootstrapThread_.join();
   bootstrapListener_.Close();
@@ -90,6 +97,9 @@ void RosBridgeManager::Stop()
   {
     std::lock_guard<std::mutex> lock(flowsMutex_);
     flows.swap(flows_);
+  }
+  if (!flows.empty()) {
+    RCLCPP_INFO(get_logger(), "closing %zu active flow(s)", flows.size());
   }
   for (auto & [flowId, flow] : flows) {
     (void)flowId;
@@ -132,8 +142,15 @@ void RosBridgeManager::HandleBootstrapClient(IpcSession & client)
   std::vector<std::uint8_t> payload;
   std::vector<OwnedFd> fds;
   Status received = client.ReceiveFrame(header, payload, fds, kBootstrapRequestTimeout);
-  if (received != Status::kOk || header.fdCount != 0)
+  if (received != Status::kOk) {
+    RCLCPP_WARN(get_logger(), "dropped bootstrap request: %s", ToString(received));
     return;
+  }
+  if (header.fdCount != 0) {
+    RCLCPP_WARN(get_logger(), "dropped bootstrap request carrying %u fds",
+        static_cast<unsigned>(header.fdCount));
+    return;
+  }
 
   if (header.operation == static_cast<std::uint16_t>(Operation::kRegisterFlowRequest)) {
     ipc_proto::RegisterFlowRequest request;
@@ -144,6 +161,10 @@ void RosBridgeManager::HandleBootstrapClient(IpcSession & client)
     Status result = IpcSession::ParseProtoPayload(payload, request);
     if (result == Status::kOk) {
       result = RegisterFlow(request, socketPath, instanceToken, diagnostic);
+    }
+    if (result != Status::kOk) {
+      RCLCPP_WARN(get_logger(), "rejected flow '%s': %s (%s)", request.flow_id().c_str(),
+          diagnostic.empty() ? "malformed request" : diagnostic.c_str(), ToString(result));
     }
     response.set_status(ToProtoStatusCode(result));
     response.set_data_socket_path(socketPath);
@@ -166,10 +187,19 @@ void RosBridgeManager::HandleBootstrapClient(IpcSession & client)
     if (result == Status::kOk) {
       result = UnregisterFlow(request.flow_id(), request.instance_token(), diagnostic);
     }
+    if (result != Status::kOk) {
+      RCLCPP_WARN(get_logger(), "rejected unregister of flow '%s': %s (%s)",
+          request.flow_id().c_str(), diagnostic.empty() ? "malformed request" : diagnostic.c_str(),
+          ToString(result));
+    }
     response.set_status(ToProtoStatusCode(result));
     response.set_diagnostic_message(diagnostic);
     client.SendProtoFrame(Operation::kUnregisterFlowResponse, header.requestId, response);
+    return;
   }
+
+  RCLCPP_WARN(get_logger(), "dropped bootstrap request with unknown operation %u",
+      static_cast<unsigned>(header.operation));
 }
 
 Status RosBridgeManager::RegisterFlow(const ipc_proto::RegisterFlowRequest & request,
@@ -189,11 +219,9 @@ Status RosBridgeManager::RegisterFlow(const ipc_proto::RegisterFlowRequest & req
   config.contractTypeName = request.contract_type_name();
   config.direction = FromProtoDirection(request.direction());
   config.rosTopic = request.ros_topic();
-  config.requestTimeoutMs = request.request_timeout_ms();
-  config.sampleTimeoutMs = request.sample_timeout_ms();
+  config.timeoutMs = request.timeout_ms();
   config.startupTimeoutMs = request.startup_timeout_ms();
   config.qosProfile = FromProtoQosProfile(request.qos_profile());
-  config.qosDepth = request.qos_depth();
   FlowRegistration registration;
   {
     std::lock_guard<std::mutex> lock(flowsMutex_);
@@ -201,7 +229,7 @@ Status RosBridgeManager::RegisterFlow(const ipc_proto::RegisterFlowRequest & req
       diagnostic = "flow_id is already registered";
       return Status::kInvalidArgument;
     }
-    if (flows_.size() >= maxFlows_) {
+    if (flows_.size() >= kMaxFlows) {
       diagnostic = "maximum Flow count reached";
       return Status::kResourceError;
     }
@@ -216,16 +244,6 @@ Status RosBridgeManager::RegisterFlow(const ipc_proto::RegisterFlowRequest & req
   Status validated = ValidateFlowConfig(config, descriptor, diagnostic);
   if (validated != Status::kOk)
     return validated;
-
-  const std::size_t effectiveDepth = ResolveQosDepth(config.qosDepth);
-  if (descriptor.payloadClass == PayloadClass::kDmaBuf &&
-      config.direction == Direction::kHcmToRos &&
-      effectiveDepth >= static_cast<std::size_t>(rosDmaBufferPoolSize_)) {
-    diagnostic =
-        "effective qos_depth must be smaller than ros_dma_buffer_pool_size "
-        "for HCM_TO_ROS DMA-BUF flows";
-    return Status::kInvalidArgument;
-  }
 
   {
     std::lock_guard<std::mutex> lock(flowsMutex_);
@@ -243,28 +261,27 @@ Status RosBridgeManager::RegisterFlow(const ipc_proto::RegisterFlowRequest & req
     }
   }
 
-  std::string nodeName = "qrb_flow_";
+  std::string nodeName = "qrb_ros_adapter_flow_";
   for (char c : config.flowId) {
     nodeName.push_back(std::isalnum(static_cast<unsigned char>(c)) ? c : '_');
   }
   std::vector<rclcpp::Parameter> parameters = {
-    { "flow_id", config.flowId },
-    { "contract_type_name", config.contractTypeName },
-    { "direction", std::string(ToString(config.direction)) },
-    { "ros_topic", config.rosTopic },
-    { "data_socket_path", registration.dataSocketPath },
-    { "instance_token", registration.instanceToken },
-    { "request_timeout_ms", static_cast<std::int64_t>(config.requestTimeoutMs) },
-    { "sample_timeout_ms", static_cast<std::int64_t>(config.sampleTimeoutMs) },
-    { "startup_timeout_ms", static_cast<std::int64_t>(config.startupTimeoutMs) },
-    { "qos_profile", std::string(ToString(config.qosProfile)) },
-    { "qos_depth", static_cast<std::int64_t>(config.qosDepth) },
-    { "ros_dma_buffer_pool_size", rosDmaBufferPoolSize_ },
+      {"flow_id", config.flowId},
+      {"contract_type", config.contractTypeName},
+      {"direction", ToDirectionCode(config.direction)},
+      {"ros_topic", config.rosTopic},
+      {"data_socket_path", registration.dataSocketPath},
+      {"instance_token", registration.instanceToken},
+      {"timeout_ms", static_cast<std::int64_t>(config.timeoutMs)},
+      {"startup_timeout_ms", static_cast<std::int64_t>(config.startupTimeoutMs)},
+      {"qos_reliability", std::string(ToString(config.qosProfile.reliability))},
+      {"qos_durability", std::string(ToString(config.qosProfile.durability))},
+      {"qos_depth", static_cast<std::int64_t>(config.qosProfile.depth)},
   };
   rclcpp::NodeOptions options;
   options.use_intra_process_comms(true);
   options.parameter_overrides(parameters);
-  options.arguments({ "--ros-args", "-r", "__node:=" + nodeName });
+  options.arguments({"--ros-args", "-r", "__node:=" + nodeName});
 
   std::shared_ptr<RosFlowBridgeBase> component;
   Status created = CreateFlowBridge(
@@ -278,7 +295,7 @@ Status RosBridgeManager::RegisterFlow(const ipc_proto::RegisterFlowRequest & req
   {
     std::lock_guard<std::mutex> lock(flowsMutex_);
     flows_.emplace(config.flowId,
-        ManagedFlow{ component, config, registration.dataSocketPath, registration.instanceToken });
+        ManagedFlow{component, config, registration.dataSocketPath, registration.instanceToken});
   }
   dataSocketPath = registration.dataSocketPath;
   instanceToken = registration.instanceToken;
@@ -360,8 +377,15 @@ void RosBridgeManager::RemoveTerminatedFlow(const FlowTerminalEvent & event)
 
   executor_->remove_node(component->get_node_base_interface());
   component.reset();
-  RCLCPP_WARN(get_logger(), "removed terminated flow '%s': %s (%s)", event.flowId.c_str(),
-      event.diagnostic.c_str(), ToString(event.reason));
+  // The Adapter closes its data socket before UNREGISTER_FLOW, so a normal
+  // DeInitialize can end here too; only a Bridge-side failure is a warning.
+  if (event.peerClosed) {
+    RCLCPP_INFO(
+        get_logger(), "removed flow '%s': %s", event.flowId.c_str(), event.diagnostic.c_str());
+  } else {
+    RCLCPP_WARN(get_logger(), "removed terminated flow '%s': %s (%s)", event.flowId.c_str(),
+        event.diagnostic.c_str(), ToString(event.reason));
+  }
 }
 
 std::string RosBridgeManager::MakeDataSocketPath(const std::string & flowId)

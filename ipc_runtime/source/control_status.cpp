@@ -95,36 +95,46 @@ Direction FromProtoDirection(ipc_proto::Direction direction)
   return Direction::kUnspecified;
 }
 
-ipc_proto::QosProfile ToProtoQosProfile(QosProfile profile)
+void ToProtoQosProfile(const QosProfile & profile, ipc_proto::QosProfile & out)
 {
-  switch (profile) {
-    case QosProfile::kReliable:
-      return ipc_proto::QOS_PROFILE_RELIABLE;
-    case QosProfile::kSensorData:
-      return ipc_proto::QOS_PROFILE_SENSOR_DATA;
-    case QosProfile::kTransientLocal:
-      return ipc_proto::QOS_PROFILE_TRANSIENT_LOCAL;
-    case QosProfile::kRosDefault:
-      break;
-  }
-  return ipc_proto::QOS_PROFILE_ROS_DEFAULT;
+  out.set_reliability(profile.reliability == QosReliability::kBestEffort ?
+                          ipc_proto::QOS_RELIABILITY_BEST_EFFORT :
+                          ipc_proto::QOS_RELIABILITY_RELIABLE);
+  out.set_durability(profile.durability == QosDurability::kTransientLocal ?
+                         ipc_proto::QOS_DURABILITY_TRANSIENT_LOCAL :
+                         ipc_proto::QOS_DURABILITY_VOLATILE);
+  out.set_depth(profile.depth);
 }
 
-QosProfile FromProtoQosProfile(ipc_proto::QosProfile profile)
+QosProfile FromProtoQosProfile(const ipc_proto::QosProfile & profile)
 {
-  switch (profile) {
-    case ipc_proto::QOS_PROFILE_RELIABLE:
-      return QosProfile::kReliable;
-    case ipc_proto::QOS_PROFILE_SENSOR_DATA:
-      return QosProfile::kSensorData;
-    case ipc_proto::QOS_PROFILE_TRANSIENT_LOCAL:
-      return QosProfile::kTransientLocal;
-    case ipc_proto::QOS_PROFILE_ROS_DEFAULT:
-      return QosProfile::kRosDefault;
+  // An unknown enum value maps out of range so ValidateFlowConfig rejects it.
+  constexpr std::uint8_t kUnknown = 0xFF;
+  QosProfile out;
+  switch (profile.reliability()) {
+    case ipc_proto::QOS_RELIABILITY_RELIABLE:
+      out.reliability = QosReliability::kReliable;
+      break;
+    case ipc_proto::QOS_RELIABILITY_BEST_EFFORT:
+      out.reliability = QosReliability::kBestEffort;
+      break;
     default:
+      out.reliability = static_cast<QosReliability>(kUnknown);
       break;
   }
-  return static_cast<QosProfile>(0xFF);
+  switch (profile.durability()) {
+    case ipc_proto::QOS_DURABILITY_VOLATILE:
+      out.durability = QosDurability::kVolatile;
+      break;
+    case ipc_proto::QOS_DURABILITY_TRANSIENT_LOCAL:
+      out.durability = QosDurability::kTransientLocal;
+      break;
+    default:
+      out.durability = static_cast<QosDurability>(kUnknown);
+      break;
+  }
+  out.depth = profile.depth();
+  return out;
 }
 
 }  // namespace qrb::adapter

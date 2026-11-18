@@ -14,10 +14,7 @@ namespace qrb::adapter
 
 /**
  * @brief Overflow-safe conversion between a ROS timestamp and the Contract's
- * `timestamp_ns`.
- *
- * HLD §7.2 requires this explicitly ("ROS 时间戳与 timestamp_ns 的无溢出转换"),
- * and it is not a formality in either direction:
+ * `timestamp_ns`. Both directions can overflow:
  *
  *   - ROS `sec` is *signed*. A negative stamp cannot be represented in an
  *     unsigned nanosecond count, and casting it would silently produce a
@@ -27,7 +24,7 @@ namespace qrb::adapter
  *     cannot be represented in a ROS message at all.
  *
  * Both are reported rather than clamped: a conversion function must not silently modify
- * its input (HLD §6.3).
+ * its input.
  */
 
 constexpr std::uint64_t kNanosPerSecond = 1000000000ULL;

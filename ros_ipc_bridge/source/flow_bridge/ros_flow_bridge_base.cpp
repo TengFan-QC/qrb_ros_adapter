@@ -23,19 +23,6 @@ namespace qrb::adapter
 namespace
 {
 
-bool ParseConfiguredDirection(std::string_view text, Direction & out)
-{
-  if (text == "ros_to_hcm") {
-    out = Direction::kRosToHcm;
-    return true;
-  }
-  if (text == "hcm_to_ros") {
-    out = Direction::kHcmToRos;
-    return true;
-  }
-  return false;
-}
-
 /**
  * @brief How long the service thread waits for a frame before re-checking the
  * stop flag.
@@ -43,7 +30,7 @@ bool ParseConfiguredDirection(std::string_view text, Direction & out)
  * Long enough that an idle Flow costs nothing measurable, short enough that
  * destroying a Flow is not perceptibly delayed.
  */
-constexpr std::chrono::milliseconds kServicePollInterval{ 200 };
+constexpr std::chrono::milliseconds kServicePollInterval{200};
 using Clock = std::chrono::steady_clock;
 
 std::chrono::milliseconds Remaining(Clock::time_point deadline)
@@ -51,8 +38,8 @@ std::chrono::milliseconds Remaining(Clock::time_point deadline)
   const auto now = Clock::now();
   if (now >= deadline)
     return std::chrono::milliseconds(0);
-  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-  return remaining.count() > 0 ? remaining : std::chrono::milliseconds(1);
+  // Round up so a wait never ends before the deadline.
+  return std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
 }
 
 Status QueryReceivedBufferSize(int fd, std::uint64_t & outSize)
@@ -108,43 +95,46 @@ Status RosFlowBridgeBase::DeclareAndReadParameters(FlowConfig & config,
   registration.dataSocketPath = this->declare_parameter<std::string>("data_socket_path", "");
   registration.instanceToken = this->declare_parameter<std::string>("instance_token", "");
 
-  config.contractTypeName = this->declare_parameter<std::string>("contract_type_name", "");
+  config.contractTypeName = this->declare_parameter<std::string>("contract_type", "");
   const std::int64_t timeoutMs = this->declare_parameter<std::int64_t>(
-      "request_timeout_ms", static_cast<std::int64_t>(config.requestTimeoutMs));
-  const std::int64_t sampleTimeoutMs = this->declare_parameter<std::int64_t>(
-      "sample_timeout_ms", static_cast<std::int64_t>(config.sampleTimeoutMs));
+      "timeout_ms", static_cast<std::int64_t>(config.timeoutMs));
   const std::int64_t startupTimeoutMs = this->declare_parameter<std::int64_t>(
       "startup_timeout_ms", static_cast<std::int64_t>(config.startupTimeoutMs));
+  const std::string reliabilityText = this->declare_parameter<std::string>(
+      "qos_reliability", ToString(config.qosProfile.reliability));
+  const std::string durabilityText = this->declare_parameter<std::string>(
+      "qos_durability", ToString(config.qosProfile.durability));
   const std::int64_t qosDepth = this->declare_parameter<std::int64_t>(
-      "qos_depth", static_cast<std::int64_t>(config.qosDepth));
-  const std::string qosProfileText =
-      this->declare_parameter<std::string>("qos_profile", ToString(config.qosProfile));
+      "qos_depth", static_cast<std::int64_t>(config.qosProfile.depth));
 
-  const std::string directionText = this->declare_parameter<std::string>("direction", "");
+  // 0 HCM to ROS, 1 ROS to HCM, as in the Adapter's static config.
+  const std::int64_t directionCode = this->declare_parameter<std::int64_t>("direction", -1);
   if (config.contractTypeName.empty()) {
-    diagnostic_ += "contract_type_name must not be empty; ";
+    diagnostic_ += "contract_type must not be empty; ";
     return Status::kInvalidArgument;
   }
   constexpr std::int64_t kUint32Max = std::numeric_limits<std::uint32_t>::max();
-  if (timeoutMs < 0 || timeoutMs > kUint32Max || sampleTimeoutMs < 0 ||
-      sampleTimeoutMs > kUint32Max || startupTimeoutMs < 0 || startupTimeoutMs > kUint32Max ||
-      qosDepth < 0 || qosDepth > kUint32Max) {
+  if (timeoutMs < 0 || timeoutMs > kUint32Max || startupTimeoutMs < 0 ||
+      startupTimeoutMs > kUint32Max || qosDepth < 0 || qosDepth > kUint32Max) {
     diagnostic_ += "timeout and qos_depth parameters must fit uint32; ";
     return Status::kInvalidArgument;
   }
 
-  config.requestTimeoutMs = static_cast<std::uint32_t>(timeoutMs);
-  config.sampleTimeoutMs = static_cast<std::uint32_t>(sampleTimeoutMs);
+  config.timeoutMs = static_cast<std::uint32_t>(timeoutMs);
   config.startupTimeoutMs = static_cast<std::uint32_t>(startupTimeoutMs);
-  config.qosDepth = static_cast<std::uint32_t>(qosDepth);
+  config.qosProfile.depth = static_cast<std::uint32_t>(qosDepth);
 
-  if (!ParseConfiguredDirection(directionText, config.direction)) {
-    diagnostic_ +=
-        "direction must be \"ros_to_hcm\" or \"hcm_to_ros\", got \"" + directionText + "\"; ";
+  if (!ParseDirectionCode(directionCode, config.direction)) {
+    diagnostic_ += "direction must be 0 (HCM to ROS) or 1 (ROS to HCM), got " +
+                   std::to_string(directionCode) + "; ";
     return Status::kInvalidArgument;
   }
-  if (!ParseQosProfile(qosProfileText, config.qosProfile)) {
-    diagnostic_ += "qos_profile is not supported: \"" + qosProfileText + "\"; ";
+  if (!ParseQosReliability(reliabilityText, config.qosProfile.reliability)) {
+    diagnostic_ += "qos_reliability is not supported: \"" + reliabilityText + "\"; ";
+    return Status::kInvalidArgument;
+  }
+  if (!ParseQosDurability(durabilityText, config.qosProfile.durability)) {
+    diagnostic_ += "qos_durability is not supported: \"" + durabilityText + "\"; ";
     return Status::kInvalidArgument;
   }
   return Status::kOk;
@@ -256,7 +246,13 @@ void RosFlowBridgeBase::ServiceLoop()
     if (received == Status::kTimeout)
       continue;  // re-check the stop flag
     if (received != Status::kOk) {
-      Fail(received, "receive failed");
+      // The Adapter closes its data socket on DeInitialize, and the kernel
+      // does the same when the HCM process exits.
+      if (session_.PeerClosed()) {
+        Fail(received, "HCM side closed the data Session", true);
+      } else {
+        Fail(received, "receive failed");
+      }
       return;
     }
 
@@ -306,12 +302,11 @@ Status RosFlowBridgeBase::HandleFetchRequest(std::uint64_t requestId)
 {
   OutboundPayload outbound;
   std::string diagnostic;
-  Status taken = handler_->Fetch(
-      *contractMessage_, outbound, diagnostic, std::chrono::milliseconds(config_.sampleTimeoutMs));
+  Status taken = handler_->Fetch(*contractMessage_, outbound, diagnostic);
 
   if (taken == Status::kNoData) {
-    // Report the exhausted sample wait without terminating the Flow. The
-    // next GF invocation may issue another FETCH_REQUEST on this Session.
+    // No fresh sample yet: answer at once without terminating the Flow. The
+    // next host invocation may issue another FETCH_REQUEST on this Session.
     ++noDataResponses_;
     Status sent =
         session_.SendStatusResponse(Operation::kFetchResponse, requestId, Status::kNoData, "");
@@ -322,11 +317,11 @@ Status RosFlowBridgeBase::HandleFetchRequest(std::uint64_t requestId)
 
   if (taken != Status::kOk) {
     ++conversionErrors_;
-    RCLCPP_WARN(this->get_logger(), "flow '%s': conversion failed: %s", config_.flowId.c_str(),
-        diagnostic.c_str());
-    // Report the conversion result before the HCM client closes the
-    // terminal Flow. The server keeps ownership of teardown via its
-    // terminal event path.
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+        "flow '%s': conversion failed: %s", config_.flowId.c_str(), diagnostic.c_str());
+    // Report the result to HCM. A frame error drops only this sample; for
+    // any other failure the HCM client closes the Flow, and the server
+    // keeps ownership of teardown via its terminal event path.
     Status sent =
         session_.SendStatusResponse(Operation::kFetchResponse, requestId, taken, diagnostic);
     if (sent != Status::kOk)
@@ -350,15 +345,15 @@ Status RosFlowBridgeBase::HandleFetchRequest(std::uint64_t requestId)
 
   if (hasFd) {
     // Keep outbound.keepAlive held until HCM confirms that it has copied
-    // the producer Buffer into GF-owned storage. Releasing after sendmsg()
+    // the producer Buffer into host-owned storage. Releasing after sendmsg()
     // alone would let a ROS-side pool reuse the same DMA-BUF too early.
     TransportHeader completionHeader;
     std::vector<std::uint8_t> completionPayload;
     std::vector<OwnedFd> completionFds;
     Status received = session_.ReceiveFrame(completionHeader, completionPayload, completionFds,
-        std::chrono::milliseconds(config_.requestTimeoutMs));
+        std::chrono::milliseconds(config_.timeoutMs));
     if (received != Status::kOk) {
-      Fail(received, "no FETCH_COMPLETE within request_timeout_ms");
+      Fail(received, "no FETCH_COMPLETE within timeout_ms");
       return received;
     }
     ++framesIn_;
@@ -375,6 +370,14 @@ Status RosFlowBridgeBase::HandleFetchRequest(std::uint64_t requestId)
       return Status::kProtocolError;
     }
     const Status peerStatus = FromProtoStatusCode(completion.status());
+    if (IsFrameError(peerStatus)) {
+      // HCM dropped this sample, e.g. it was larger than the host's buffer.
+      ++conversionErrors_;
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+          "flow '%s': HCM dropped a fetched sample: %s", config_.flowId.c_str(),
+          completion.diagnostic_message().c_str());
+      return Status::kOk;
+    }
     if (peerStatus != Status::kOk) {
       Fail(peerStatus, "HCM rejected fetched payload: " + completion.diagnostic_message());
       return peerStatus;
@@ -406,7 +409,7 @@ Status RosFlowBridgeBase::HandlePublishRequest(const TransportHeader & header,
       Fail(Status::kProtocolError, "PUBLISH_REQUEST fd count != 1");
       return Status::kProtocolError;
     }
-    inbound.fd = std::move(fds[0]);
+    inbound.fd = std::move(fds.front());
     inbound.hasPayload = true;
     std::uint64_t bufferSize = 0;
     if (QueryReceivedBufferSize(inbound.fd.Get(), bufferSize) != Status::kOk || bufferSize == 0 ||
@@ -442,13 +445,13 @@ Status RosFlowBridgeBase::HandlePublishRequest(const TransportHeader & header,
 
   if (published != Status::kOk) {
     ++conversionErrors_;
-    RCLCPP_WARN(this->get_logger(), "flow '%s': publish failed: %s", config_.flowId.c_str(),
-        diagnostic.c_str());
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+        "flow '%s': publish failed: %s", config_.flowId.c_str(), diagnostic.c_str());
   }
 
   // Publish() returns only after any HCM payload has been copied
   // into ROS-owned storage. Therefore this response is also the synchronous
-  // signal that Graph Framework may reclaim the HCM source buffer.
+  // signal that the host may reclaim the HCM source buffer.
   Status sent = session_.SendStatusResponse(
       Operation::kPublishResponse, header.requestId, published, diagnostic);
   if (sent != Status::kOk) {
@@ -457,32 +460,39 @@ Status RosFlowBridgeBase::HandlePublishRequest(const TransportHeader & header,
   }
   ++framesOut_;
 
-  // The response reaches the HCM client before it closes a terminal Flow.
+  // The response reaches the HCM client before it closes a terminal Flow;
+  // after a frame error the Flow goes on.
   return Status::kOk;
 }
 
-void RosFlowBridgeBase::Fail(Status reason, const std::string & diagnostic)
+void RosFlowBridgeBase::Fail(Status reason, const std::string & diagnostic, bool peerClosed)
 {
   Status expected = Status::kOk;
   if (!terminalReason_.compare_exchange_strong(expected, reason))
     return;
 
-  RCLCPP_ERROR(this->get_logger(), "flow '%s': %s (%s)", config_.flowId.c_str(), diagnostic.c_str(),
-      ToString(reason));
+  if (peerClosed) {
+    RCLCPP_INFO(this->get_logger(), "flow '%s': %s", config_.flowId.c_str(), diagnostic.c_str());
+  } else {
+    RCLCPP_ERROR(this->get_logger(), "flow '%s': %s (%s)", config_.flowId.c_str(),
+        diagnostic.c_str(), ToString(reason));
+  }
   serviceRunning_.store(false);
   session_.Close();
-  NotifyTerminal(reason, diagnostic);
+  NotifyTerminal(reason, diagnostic, peerClosed);
 }
 
-void RosFlowBridgeBase::NotifyTerminal(Status reason, const std::string & diagnostic)
+void RosFlowBridgeBase::NotifyTerminal(Status reason,
+    const std::string & diagnostic,
+    bool peerClosed)
 {
   if (!terminalCallback_)
     return;
   bool expected = false;
   if (!terminalNotified_.compare_exchange_strong(expected, true))
     return;
-  terminalCallback_(
-      FlowTerminalEvent{ config_.flowId, registration_.instanceToken, reason, diagnostic });
+  terminalCallback_(FlowTerminalEvent{
+      config_.flowId, registration_.instanceToken, reason, diagnostic, peerClosed});
 }
 
 void RosFlowBridgeBase::Close() noexcept
@@ -495,15 +505,23 @@ void RosFlowBridgeBase::Close() noexcept
   // rather than closing the socket under a thread that may be blocked in
   // poll()/recvmsg() on it -- that would race two threads on the same fd.
   serviceRunning_.store(false);
-  if (handler_ != nullptr)
-    handler_->CancelPendingFetch();
-  if (serviceThread_.joinable())
+  const bool started = serviceThread_.joinable();
+  if (started)
     serviceThread_.join();
 
   // Only now that no service thread can touch them: the session, then the handler.
   session_.Close();
   if (handler_ != nullptr)
     handler_->Close();
+
+  if (started) {
+    RCLCPP_INFO(this->get_logger(),
+        "flow '%s': closed, frames in %llu, out %llu, no-data %llu, conversion errors %llu",
+        config_.flowId.c_str(), static_cast<unsigned long long>(framesIn_),
+        static_cast<unsigned long long>(framesOut_),
+        static_cast<unsigned long long>(noDataResponses_),
+        static_cast<unsigned long long>(conversionErrors_));
+  }
 }
 
 }  // namespace qrb::adapter

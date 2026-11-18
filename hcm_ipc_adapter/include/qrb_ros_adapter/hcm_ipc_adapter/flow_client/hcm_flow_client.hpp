@@ -26,16 +26,14 @@ namespace qrb::adapter
  * synchronous request/response processing, and references its immutable
  * Contract conversion binding.
  *
- * Is owned directly by the GF-managed HcmIpcAdapterNode. The QCNode lifecycle
- * remains owned by HcmIpcAdapterNode; this class owns only connection resources
- * and one synchronous request/response operation per processed frame. This
- * class itself depends only on QCNode buffer descriptor interfaces, not on
- * Graph Framework scheduling types.
+ * Owned by HcmIpcAdapterNode, which also owns the QCNode lifecycle; this class
+ * owns only connection resources and one synchronous request/response
+ * operation per processed frame.
  *
  * Initialize() registers the Flow through the ROS Bridge Manager, connects to
  * the assigned data endpoint, and performs the handshake.
  *
- * Not thread-safe: the Graph Framework calls into one instance from one
+ * Not thread-safe: the host calls into one instance from one
  * scheduling context.
  */
 class HcmFlowClient
@@ -51,12 +49,15 @@ public:
   /**
    * @brief Validate `config`, select the conversion binding and establish the Session.
    *
-   * Register, data connect and handshake share one absolute deadline derived
+   * The ROS Bridge Manager must already be running: the bootstrap connect is
+   * one attempt and fails at once with kResourceError otherwise. Register,
+   * data connect and handshake then share one absolute deadline derived
    * from `config.startupTimeoutMs`. Success leaves the Client resources ready
    * for HcmIpcAdapterNode-driven Fetch()/Publish() calls.
    *
-   * @return kOk, kUnsupportedContract (type ID not registered), or
-   *         kInvalidArgument.
+   * @return kOk, kUnsupportedContract (type ID not registered),
+   *         kInvalidArgument, kResourceError (no Manager), or the Status the
+   *         Manager or the handshake reported.
    */
   Status Initialize(const FlowConfig & config,
       const std::string & bootstrapSocketPath,
@@ -67,14 +68,17 @@ public:
    *
    * Called once per processed frame descriptor. On kOk the Contract message
    * has been converted into `target`. For a DMA-BUF Contract, the received
-   * payload is synchronously copied into the GF-owned descriptor buffer
+   * payload is synchronously copied into the host-owned descriptor buffer
    * and FETCH_COMPLETE is sent before this method returns, allowing the ROS
    * peer to release the producer-owned source Buffer.
    *
    * @return kOk (data converted), kBadState if not initialized, or a fatal
-   *         Status. The owning IPC Adapter Node maps a fatal result to the
-   *         QCNode Error state. Exhausting the fresh ROS sample wait returns
-   *         kNoData without closing the Session.
+   *         Status that has closed the Session. Without a fresh ROS sample
+   *         the bridge answers at once and this returns kNoData, leaving
+   *         `target` untouched and the Session open. A frame error
+   *         (IsFrameError(), e.g. a sample larger than `target`) drops that
+   *         sample and also leaves the Session open; `target` may be
+   *         partially written.
    */
   Status Fetch(QC::Memory::QCBufferDescriptorBase_t & target);
 
@@ -82,21 +86,21 @@ public:
    * @brief HCM_TO_ROS: convert `source` and push it as a PUBLISH_REQUEST.
    *
    * For a DMA-BUF Contract, the descriptor's inherited dmaHandle and validSize
-   * describe the GF-owned payload buffer. The fd travels in the same frame
+   * describe the host-owned payload buffer. The fd travels in the same frame
    * via SCM_RIGHTS, while the valid byte count is checked against the
-   * Contract. The caller and Graph Framework retain ownership of the HCM
+   * Contract. The caller and the host retain ownership of the HCM
    * buffer; the Adapter neither duplicates nor recycles it.
    *
    * For an Inline Contract, leave the payload fields at their defaults.
    *
    * Awaits PUBLISH_RESPONSE. For a DMA-BUF Contract, kOk means the ROS IPC
    * Bridge has copied the payload into ROS-owned storage and accepted the
-   * publish, so Graph Framework may synchronously reclaim the HCM buffer when
-   * this call returns. No asynchronous completion or receiver thread exists.
+   * publish, so the host may synchronously reclaim the HCM buffer when
+   * this call returns.
    *
-   * @return kOk, kBadState if not initialized, kInvalidArgument, or a fatal
-   *         Status. The owning IPC Adapter Node maps a fatal result to the
-   *         QCNode Error state.
+   * @return kOk, kBadState if not initialized, a frame error (IsFrameError():
+   *         nothing was published, the Session stays open), or a fatal
+   *         Status that has closed the Session.
    */
   Status Publish(const QC::Memory::QCBufferDescriptorBase_t & source);
 
@@ -105,6 +109,9 @@ public:
    * resources. Idempotent.
    */
   void Close();
+
+  /** @brief True from a successful Initialize() until Close(), explicit or after a fatal error. */
+  bool IsOpen() const { return binding_ != nullptr; }
 
   const FlowContext & Context() const { return context_; }
 
@@ -117,18 +124,25 @@ private:
   /** @brief Tear down resources after a failed operation and return the original reason. */
   Status Fail(Status reason, const std::string & diagnostic);
 
-  std::chrono::milliseconds RequestTimeout() const
+  /**
+   * @brief Drop a fetched sample with frame error `reason`. For a DMA-BUF
+   * Contract, FETCH_COMPLETE carries `reason` so the ROS peer releases the
+   * producer Buffer and keeps serving. @return `reason`, or the fatal send failure
+   */
+  Status RejectFetched(std::uint64_t requestId, Status reason, const std::string & diagnostic);
+
+  std::chrono::milliseconds Timeout() const
   {
-    return std::chrono::milliseconds(context_.Config().requestTimeoutMs);
+    return std::chrono::milliseconds(context_.Config().timeoutMs);
   }
 
   FlowContext context_;
   IpcSession session_;
-  const HcmContractBinding * binding_{ nullptr };
+  const HcmContractBinding * binding_{nullptr};
   std::unique_ptr<google::protobuf::MessageLite> contractMessage_;
   std::string bootstrapSocketPath_;
 
-  bool managerRegistered_{ false };
+  bool managerRegistered_{false};
 };
 
 }  // namespace qrb::adapter
