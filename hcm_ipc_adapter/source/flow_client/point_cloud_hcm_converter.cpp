@@ -89,11 +89,12 @@ ConversionResult ConvertContractToHcm<PointCloudHcmContract, PointCloudHcmDescri
   descriptor.isBigEndian = cloud.is_bigendian();
   descriptor.isDense = cloud.is_dense();
   descriptor.numFields = static_cast<std::uint32_t>(cloud.fields_size());
-  for (std::uint32_t i = 0; i < QRB::Memory::QRB_POINT_CLOUD_MAX_FIELDS; ++i) {
-    QRB::Memory::PointField_t & out = descriptor.fields[i];
+  for (QRB::Memory::PointField_t & out : descriptor.fields) {
     out = QRB::Memory::PointField_t();
-    if (i >= descriptor.numFields)
-      continue;
+  }
+  // CheckDescriptorCapacity bounds numFields by QRB_POINT_CLOUD_MAX_FIELDS.
+  for (std::uint32_t i = 0; i < descriptor.numFields; ++i) {
+    QRB::Memory::PointField_t & out = descriptor.fields[i];
     const sensor_proto::PointField & field = cloud.fields(static_cast<int>(i));
     if (!AssignHcmString(field.name(), out.name)) {
       return ConversionResult::Failure(
