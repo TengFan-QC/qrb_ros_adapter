@@ -26,9 +26,10 @@ namespace qrb::adapter
 enum class Status : std::uint8_t
 {
   kOk = 0,              /**< Success. */
-  kNoData,              /**< The ROS bridge's bounded fresh-sample wait expired.
-                             The current call reports timeout to GF, while the
-                             Flow and data Session remain usable. */
+  kNoData,              /**< The ROS bridge had no fresh sample when asked.
+                             A normal outcome, not an error: the host call
+                             succeeds without writing the descriptor, and
+                             the Flow and data Session remain usable. */
   kInvalidArgument,     /**< Caller supplied an invalid argument, or a
                              received message failed validation. */
   kUnsupportedContract, /**< Contract type name is not registered, or its
@@ -60,20 +61,27 @@ constexpr bool IsOk(Status status)
 }
 
 /**
+ * @brief True if `status` rejects one frame and leaves the Flow usable.
+ *
+ * The frame did not fit the descriptor or the Contract (for example a payload
+ * larger than the destination buffer). Both sides finish the request/response
+ * exchange, drop that frame and keep the Session open for the next one.
+ */
+constexpr bool IsFrameError(Status status)
+{
+  return status == Status::kInvalidArgument || status == Status::kConversionError;
+}
+
+/**
  * @brief True if `status` is terminal for a Flow.
  *
- * A Protocol/Transport/fd error or request timeout moves the Flow to Error and
- * it never reconnects on its own. kNoData is a completed, nonfatal request.
+ * A Protocol/Transport/fd/resource error or request timeout closes the Session
+ * and the Flow never reconnects on its own. kNoData is a completed, nonfatal
+ * request; a frame error (IsFrameError()) drops only that frame.
  */
 constexpr bool IsFatalForFlow(Status status)
 {
-  switch (status) {
-    case Status::kOk:
-    case Status::kNoData:
-      return false;
-    default:
-      return true;
-  }
+  return status != Status::kOk && status != Status::kNoData && !IsFrameError(status);
 }
 
 }  // namespace qrb::adapter

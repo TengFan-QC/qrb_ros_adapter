@@ -25,8 +25,10 @@ namespace qrb::adapter
 class RosBridgeManager : public rclcpp::Node
 {
 public:
+  /** The bootstrap socket path is fixed in production; another path serves a private Manager. */
   explicit RosBridgeManager(std::shared_ptr<rclcpp::Executor> executor,
-      const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
+      const rclcpp::NodeOptions & options = rclcpp::NodeOptions(),
+      std::string bootstrapSocketPath = kDefaultBootstrapSocketPath);
   ~RosBridgeManager() override;
 
   void Start();
@@ -60,9 +62,7 @@ private:
   std::shared_ptr<rclcpp::Executor> executor_;
   std::string bootstrapSocketPath_;
   std::string flowSocketDirectory_;
-  std::size_t maxFlows_{ 32 };
-  int rosDmaBufferPoolSize_{ 12 };
-  std::uint64_t nextEndpointId_{ 0 };
+  std::uint64_t nextEndpointId_{0};
 
   mutable std::mutex flowsMutex_;
   std::unordered_map<std::string, ManagedFlow> flows_;
@@ -72,7 +72,7 @@ private:
   OwnedFd terminalEventFd_;
   IpcSession bootstrapListener_;
 
-  std::atomic<bool> running_{ false };
+  std::atomic<bool> running_{false};
   std::thread bootstrapThread_;
 };
 

@@ -19,7 +19,7 @@ namespace qrb::adapter
 #undef QRB_CONTRACT_MAPPING
 
 inline constexpr ContractDescriptor kContractDescriptors[] = {
-#define QRB_CONTRACT_MAPPING(Id, TypeName, Payload, ...) { TypeName, PayloadClass::k##Payload },
+#define QRB_CONTRACT_MAPPING(Id, TypeName, Payload, ...) {TypeName, PayloadClass::k##Payload},
 #include "qrb_ros_adapter/ipc_runtime/contract_mappings.def"
 #undef QRB_CONTRACT_MAPPING
 };

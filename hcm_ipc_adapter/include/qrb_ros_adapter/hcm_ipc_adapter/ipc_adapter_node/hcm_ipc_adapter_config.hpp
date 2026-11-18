@@ -14,71 +14,74 @@ namespace qrb::adapter
 {
 
 /**
- * @brief Mapping from the GF-local frame descriptor slots to one Flow.
+ * @brief Default buffer index of the Flow's descriptor in the frame passed to
+ * ProcessFrameDescriptor().
  *
- * GFNodeAdaptor converts global buffer IDs into a dense local
- * QCFrameDescriptorNodeIfs before invoking the QCNode. The IPC Adapter must
- * therefore index the local descriptor, not the graph-global buffer table.
+ * The node uses exactly one buffer. Without a `globalBufferIdMap` it is at
+ * index 0, the identity map other QCNodes default to.
  */
-struct HcmFrameBufferLayout
-{
-  std::uint32_t descriptorLocalSlot{ 0 };
-};
+constexpr std::uint32_t kHcmDefaultGlobalBufferId = 0;
 
 /** @brief HCM-only configuration layered on top of the shared FlowConfig. */
 struct HcmIpcAdapterConfig
 {
+  /** `flowConfig.flowId` is the QCNode `name`. */
   FlowConfig flowConfig;
-  std::string bootstrapSocketPath;
   std::string nodeName;
-  std::uint32_t nodeId{ 0 };
-  HcmFrameBufferLayout buffers;
-  /** Enable per-frame clock sampling for latency fields in Monitoring data. */
-  bool enableLatencyMonitoring{ false };
+  std::uint32_t nodeId{0};
+  /** Index of the descriptor in the host frame, from `globalBufferIdMap`. */
+  std::uint32_t globalBufferId{kHcmDefaultGlobalBufferId};
 };
 
 /** QCNode configuration contract generated from the parser's canonical field lists. */
 const std::string & HcmIpcAdapterConfigOptions();
 
 /**
- * @brief Parse the one configured FlowConfig from GF JSON configuration.
+ * @brief Parse the complete QCNode configuration.
  *
- * The ROS IPC Bridge gets its Flow from ROS parameters (HLD §7.5); the HCM IPC Adapter gets
- * the equivalent from the Graph Framework's own config string, which is JSON.
+ * The QCNode config string, which is JSON, is the only Flow configuration of
+ * the HCM IPC Adapter; the ROS IPC Bridge receives it over REGISTER_FLOW.
  * Parsing is kept separate from the QCNode interface methods so it can be
  * unit tested independently.
  *
- * Expected shape -- the `"static"` object is the GF static configuration block:
+ * Expected shape -- the `"static"` object is the QCNode static configuration block.
+ * Only the first four fields are required:
  *
  *   {
  *     "static": {
- *       "flow_id": "pose_to_hcm",
- *       "contract_type_name": "qrb.contract.geometry.v1.PoseWithCovarianceStamped",
- *       "direction": "ros_to_hcm",
+ *       "name": "pose_to_hcm",
+ *       "contract_type": "qrb.contract.geometry.v1.PoseWithCovarianceStamped",
+ *       "direction": 1,
  *       "ros_topic": "/localization/pose",
- *       "bootstrap_socket_path": "/run/qrb_ros_adapter/bootstrap.sock",
- *       "startup_timeout_ms": 3000,
- *       "request_timeout_ms": 100,
- *       "sample_timeout_ms": 1000,
- *       "enable_latency_monitoring": false,
- *       "descriptor_local_slot": 0
+ *       "id": 0,
+ *       "qos_profile": {
+ *         "reliability": "reliable",
+ *         "durability": "volatile",
+ *         "depth": 10
+ *       },
+ *       "globalBufferIdMap": [ { "name": "Output", "id": 0 } ]
  *     }
  *   }
  *
- * The Manager assigns the per-Flow data socket. Payload class and ROS endpoint
- * strategy are resolved from the Contract registries, not configured.
+ * `name` also identifies the Flow to the ROS Bridge Manager, so it must be
+ * unique among the Flows registered with one Manager. The Manager assigns the
+ * per-Flow data socket. The bootstrap socket path and the timeouts are fixed
+ * (FlowConfig defaults), not configured. `direction` is 0 (HCM to ROS: the
+ * node publishes the descriptor) or 1 (ROS to HCM: the node fills it in).
+ * `qos_profile` sets the ROS reliability (`reliable`, `best_effort`),
+ * durability (`volatile`, `transient_local`) and KEEP_LAST depth (1-32); each
+ * member is optional and defaults to `rclcpp::QoS( 10 )` (reliable, volatile,
+ * depth 10). Payload class and ROS endpoint strategy are
+ * resolved from the Contract registries. `globalBufferIdMap` follows the
+ * QCNode convention for a frame shared by several nodes: it has exactly one
+ * entry, whose `id` is the index of the native qrb_contracts descriptor in the
+ * frame (default kHcmDefaultGlobalBufferId) and whose non-empty `name` is
+ * informational. Unknown fields are rejected.
  *
  * @param diagnostic Filled in with a human-readable reason on failure.
- * @return kOk, or kInvalidArgument if the JSON is malformed or a required
- *         field is missing, of the wrong type, or has an unrecognized value.
- */
-Status ParseFlowConfigJson(const std::string & json, FlowConfig & out, std::string & diagnostic);
-
-/**
- * @brief Parse the complete GF-facing QCNode configuration.
- *
- * Every Contract uses exactly one local slot containing its native
- * qrb_contracts descriptor. DMA payload storage is inherited by that descriptor.
+ * @return kOk, kUnsupportedContract, or kInvalidArgument if the JSON is
+ *         malformed or a field is missing, unknown, of the wrong type, or has
+ *         an unrecognized value.
  */
 Status ParseHcmIpcAdapterConfigJson(const std::string & json,
     HcmIpcAdapterConfig & out,

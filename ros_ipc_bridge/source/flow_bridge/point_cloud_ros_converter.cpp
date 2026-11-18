@@ -24,14 +24,14 @@ struct PointFieldTypeMapping
 };
 
 constexpr PointFieldTypeMapping kPointFieldTypes[] = {
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_INT8, sensor_msgs::msg::PointField::INT8 },
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_UINT8, sensor_msgs::msg::PointField::UINT8 },
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_INT16, sensor_msgs::msg::PointField::INT16 },
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_UINT16, sensor_msgs::msg::PointField::UINT16 },
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_INT32, sensor_msgs::msg::PointField::INT32 },
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_UINT32, sensor_msgs::msg::PointField::UINT32 },
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_FLOAT32, sensor_msgs::msg::PointField::FLOAT32 },
-  { ::qrb::contract::sensor::v1::POINT_FIELD_TYPE_FLOAT64, sensor_msgs::msg::PointField::FLOAT64 },
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_INT8, sensor_msgs::msg::PointField::INT8},
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_UINT8, sensor_msgs::msg::PointField::UINT8},
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_INT16, sensor_msgs::msg::PointField::INT16},
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_UINT16, sensor_msgs::msg::PointField::UINT16},
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_INT32, sensor_msgs::msg::PointField::INT32},
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_UINT32, sensor_msgs::msg::PointField::UINT32},
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_FLOAT32, sensor_msgs::msg::PointField::FLOAT32},
+    {::qrb::contract::sensor::v1::POINT_FIELD_TYPE_FLOAT64, sensor_msgs::msg::PointField::FLOAT64},
 };
 
 ConversionResult ConvertPointFieldToContract(const PointFieldRosMessage & source,

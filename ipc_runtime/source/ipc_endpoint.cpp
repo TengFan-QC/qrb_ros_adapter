@@ -38,9 +38,7 @@ Status ValidateParentDirectory(const std::string & path)
     return Status::kOk;
 
   const std::string parent = slash == 0 ? "/" : path.substr(0, slash);
-  struct stat info
-  {
-  };
+  struct stat info{};
   if (::stat(parent.c_str(), &info) != 0 || !S_ISDIR(info.st_mode)) {
     return Status::kResourceError;
   }
@@ -49,9 +47,7 @@ Status ValidateParentDirectory(const std::string & path)
 
 Status RemoveStaleSocket(const std::string & path)
 {
-  struct stat info
-  {
-  };
+  struct stat info{};
   if (::lstat(path.c_str(), &info) != 0) {
     return errno == ENOENT ? Status::kOk : Status::kResourceError;
   }
@@ -78,27 +74,22 @@ Status RemoveStaleSocket(const std::string & path)
 }
 
 /** @brief poll() one fd for POLLIN, translating the outcome to Status. */
-Status WaitReadable(int fd, std::chrono::milliseconds timeout)
+Status WaitReadable(int fd, std::chrono::milliseconds timeout, bool & hangup)
 {
-  pollfd pfd{ fd, POLLIN, 0 };
+  hangup = false;
+  pollfd pfd{fd, POLLIN, 0};
   int rc = ::poll(&pfd, 1, static_cast<int>(timeout.count()));
   if (rc == 0)
     return Status::kTimeout;
   if (rc < 0)
     return (errno == EINTR) ? Status::kTimeout : Status::kResourceError;
 
-  // POLLHUP (and even POLLERR) can be set *together* with POLLIN when the
-  // peer has already closed its end but a frame it sent earlier is still
-  // sitting unread in this socket's receive buffer -- exactly the
-  // CONNECT_RESPONSE-then-Close() reject path, or any SendFrame()
-  // immediately followed by Stop(). Treating a hangup as fatal before
-  // checking POLLIN would silently discard that frame. Only a hangup with
-  // *nothing* left to read is an error: the next RecvFrame() gets a clean
-  // EOF via recvmsg()==0 once the buffer really is drained.
+  // POLLHUP/POLLERR can come together with POLLIN when the peer closed after
+  // sending a frame (e.g. CONNECT_RESPONSE then Close()); read that frame
+  // first, and treat a hangup as an error only when nothing is left to read.
   if (pfd.revents & POLLIN)
     return Status::kOk;
-  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
-    return Status::kResourceError;
+  hangup = (pfd.revents & POLLHUP) != 0;
   return Status::kResourceError;
 }
 
@@ -140,7 +131,7 @@ Status IpcEndpoint::Listen(const std::string & socketPath)
     return Status::kResourceError;
   }
 
-  // Backlog of 1: one Flow, one peer (HLD §4.3).
+  // Backlog of 1: one Flow, one peer.
   if (::listen(fd, 1) != 0) {
     ::close(fd);
     ::unlink(socketPath.c_str());
@@ -178,7 +169,7 @@ Status IpcEndpoint::WaitAndAccept(std::chrono::milliseconds timeout,
   if (listenFd_ < 0)
     return Status::kBadState;
 
-  pollfd pollFds[2] = { { listenFd_, POLLIN, 0 }, { wakeFd, POLLIN, 0 } };
+  pollfd pollFds[2] = {{listenFd_, POLLIN, 0}, {wakeFd, POLLIN, 0}};
   const nfds_t count = wakeFd >= 0 ? 2 : 1;
   int rc = ::poll(pollFds, count, static_cast<int>(timeout.count()));
   if (rc == 0)
@@ -243,9 +234,7 @@ Status IpcEndpoint::ConnectOnce(const std::string & socketPath)
   ::close(fd);
 
   // The peer has not bound or is not accepting yet. Expose that distinction
-  // so a caller can keep waiting within one bounded startup operation. Once a
-  // Flow has failed or disconnected, its lifecycle does not call ConnectOnce()
-  // again.
+  // so a caller can keep waiting within one bounded startup operation.
   if (err == ENOENT || err == ECONNREFUSED || err == EAGAIN || err == EINTR) {
     return Status::kTimeout;
   }
@@ -326,14 +315,16 @@ Status IpcEndpoint::RecvFrame(TransportHeader & headerOut,
   if (fd_ < 0)
     return Status::kBadState;
 
-  Status wait = WaitReadable(fd_, timeout);
+  bool hangup = false;
+  Status wait = WaitReadable(fd_, timeout, hangup);
+  peerClosed_ = hangup;
   if (wait != Status::kOk)
     return wait;
 
   const std::size_t receiveCapacity = kTransportHeaderEncodedSize + kMaxPayloadSize;
   if (receiveBuffer_.size() != receiveCapacity)
     receiveBuffer_.resize(receiveCapacity);
-  iovec iov{ receiveBuffer_.data(), receiveBuffer_.size() };
+  iovec iov{receiveBuffer_.data(), receiveBuffer_.size()};
 
   alignas(cmsghdr) char cmsgBuf[CMSG_SPACE(sizeof(int) * kMaxFdCount)];
   std::memset(cmsgBuf, 0, sizeof(cmsgBuf));
@@ -347,8 +338,11 @@ Status IpcEndpoint::RecvFrame(TransportHeader & headerOut,
   ssize_t received = ::recvmsg(fd_, &msg, MSG_CMSG_CLOEXEC);
   if (received < 0)
     return Status::kResourceError;
-  if (received == 0)
-    return Status::kResourceError;  // peer shut down cleanly -- EOF
+  if (received == 0)  // peer shut down cleanly -- EOF
+  {
+    peerClosed_ = true;
+    return Status::kResourceError;
+  }
 
   // Take ownership of every fd the kernel installed *before* any validation
   // below can return early -- otherwise a malformed frame that happened to
@@ -426,6 +420,7 @@ void IpcEndpoint::Close() noexcept
     ::unlink(socketPath_.c_str());
     socketPath_.clear();
   }
+  peerClosed_ = false;
 }
 
 }  // namespace qrb::adapter

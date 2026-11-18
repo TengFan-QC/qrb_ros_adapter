@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Same lookup order as QrbProtobuf.cmake: protobuf's own package carries the
+# abseil link interface that FindProtobuf leaves out.
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+  find_dependency(Protobuf)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/qrb_ros_adapter_runtimeTargets.cmake")
+
+check_required_components(qrb_ros_adapter_runtime)

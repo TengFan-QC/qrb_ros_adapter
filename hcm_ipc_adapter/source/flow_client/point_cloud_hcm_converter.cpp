@@ -48,7 +48,7 @@ ConversionResult ConvertContractToHcm<PointCloudHcmContract, PointCloudHcmDescri
   }
   if (descriptor.pBuf == nullptr || descriptor.offset > descriptor.size ||
       copySize > descriptor.size - descriptor.offset) {
-    return ConversionResult::Failure("GF PointCloud descriptor buffer is missing or too small");
+    return ConversionResult::Failure("HCM PointCloud descriptor buffer is missing or too small");
   }
 
   descriptor.timestampNs = cloud.timestamp_ns();

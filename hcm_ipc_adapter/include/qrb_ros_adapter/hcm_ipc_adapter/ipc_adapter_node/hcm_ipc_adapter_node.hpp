@@ -28,10 +28,16 @@ class HcmIpcAdapterNodeConfig final : public QC::QCNodeConfigIfs
 {
 public:
   QC::QCStatus_e VerifyAndSet(const std::string config, std::string & errors) override;
-  const std::string & GetOptions() override;
+  // QCNode SDKs declare GetOptions() either as a reference getter or with a
+  // status return; both forms are provided so the node builds against either.
+  const std::string & GetOptions();
+  QC::QCStatus_e GetOptions(std::string & options);
   const QC::QCNodeConfigBase_t & Get() override;
 
   const HcmIpcAdapterConfig & Adapter() const { return config_.adapter; }
+
+  /** @brief Forget the configuration, e.g. one whose Initialize() failed. */
+  void Clear();
 
 private:
   HcmIpcAdapterNodeConfigData config_{};
@@ -40,12 +46,19 @@ private:
 
 struct HcmIpcAdapterMonitoringData : public QC::QCNodeMonitoringBase_t
 {
-  std::uint32_t sessionConnected{ 0 };
-  std::uint64_t frameCount{ 0 };
-  std::uint64_t errorCount{ 0 };
-  std::uint64_t lastLatencyNs{ 0 };
-  std::uint64_t averageLatencyNs{ 0 };
-  std::uint64_t maxLatencyNs{ 0 };
+  /** 1: the data Session with the ROS Bridge is open; 0 before it is set up and after a fatal
+   * error. */
+  std::uint32_t sessionConnected{0};
+  std::uint64_t frameCount{0};
+  /** Calls that failed: dropped frames (frame errors), then every call after a fatal error. */
+  std::uint64_t errorCount{0};
+  /** Latency values cover only calls that moved a sample; no-data and failed calls are excluded. */
+  std::uint64_t lastLatencyNs{0};
+  std::uint64_t averageLatencyNs{0};
+  std::uint64_t minLatencyNs{0};
+  std::uint64_t maxLatencyNs{0};
+  /** ROS_TO_HCM calls that found no fresh sample; counted in frameCount, not errorCount. */
+  std::uint64_t noDataCount{0};
 };
 
 class HcmIpcAdapterNodeMonitoring final : public QC::QCNodeMonitoringIfs
@@ -54,38 +67,46 @@ public:
   HcmIpcAdapterNodeMonitoring();
 
   QC::QCStatus_e VerifyAndSet(const std::string config, std::string & errors) override;
-  const std::string & GetOptions() override;
+  // QCNode SDKs declare GetOptions() either as a reference getter or with a
+  // status return; both forms are provided so the node builds against either.
+  const std::string & GetOptions();
+  QC::QCStatus_e GetOptions(std::string & options);
   const QC::QCNodeMonitoringBase_t & Get() override;
   std::uint32_t GetMaximalSize() override;
   std::uint32_t GetCurrentSize() override;
   QC::QCStatus_e Place(void * data, std::uint32_t & size) override;
 
-  void UpdateSession(bool sessionConnected);
-  void RecordProcess(QC::QCStatus_e status,
-      bool sessionConnected,
-      bool latencyMeasured,
-      std::uint64_t latencyNs);
+  void RecordProcess(Status status, std::uint64_t latencyNs);
+  void SetSessionConnected(bool connected);
   void Reset();
 
 private:
   std::mutex mutex_;
   HcmIpcAdapterMonitoringData data_{};
-  std::uint64_t totalLatencyNs_{ 0 };
+  std::uint64_t latencySamples_{0};
+  std::uint64_t totalLatencyNs_{0};
   std::string options_;
 };
 
 /**
- * @brief GF-managed synchronous QCNode implementation for one HCM IPC Flow.
+ * @brief Synchronous QCNode implementation for one HCM IPC Flow.
  *
- * GF owns scheduling, threads, frame descriptors, and buffer lifetime. This
- * node implements the standard QCNodeIfs extension point directly and keeps
- * no second lifecycle wrapper. It borrows local frame buffers only for the
- * duration of ProcessFrameDescriptor().
+ * The host owns scheduling, threads, frame descriptors, and buffer lifetime.
+ * This node implements the standard QCNodeIfs extension point directly. It
+ * borrows local frame buffers only for the duration of ProcessFrameDescriptor().
+ *
+ * A frame error (IsFrameError(), e.g. a sample larger than the host's buffer)
+ * fails only that call and counts in errorCount; the Flow goes on. A fatal
+ * Flow status closes the Session without changing the QCNode state; every
+ * later ProcessFrameDescriptor() returns that status until the host calls
+ * Stop() and Start(). Start() then registers the Flow again; if that fails,
+ * the node stays READY and the host may call Start() again.
  */
 class HcmIpcAdapterNode final : public QC::QCNodeIfs
 {
 public:
-  HcmIpcAdapterNode() = default;
+  /** The bootstrap socket path is fixed in production; another path reaches a private Manager. */
+  explicit HcmIpcAdapterNode(std::string bootstrapSocketPath = kDefaultBootstrapSocketPath);
   ~HcmIpcAdapterNode();
 
   QC::QCStatus_e Initialize(QC::QCNodeInit_t & config) override;
@@ -98,20 +119,19 @@ public:
   QC::QCNodeMonitoringIfs & GetMonitoringIfs() override;
 
 private:
-  QC::QCStatus_e ProcessRosToHcm(QC::QCFrameDescriptorNodeIfs & frameDesc);
-  QC::QCStatus_e ProcessHcmToRos(QC::QCFrameDescriptorNodeIfs & frameDesc);
-  QC::QCStatus_e FinishOperation(Status status);
-  void UpdateMonitoring();
+  Status Process(QC::QCFrameDescriptorNodeIfs & frameDesc);
+  void FinishOperation(Status status);
 
+  const std::string bootstrapSocketPath_;
   std::mutex mutex_;
-  std::atomic<QC::QCObjectState_e> state_{ QC::QC_OBJECT_STATE_INITIAL };
+  std::atomic<QC::QCObjectState_e> state_{QC::QC_OBJECT_STATE_INITIAL};
   HcmIpcAdapterNodeConfig config_;
   HcmIpcAdapterNodeMonitoring monitoring_;
   HcmFlowClient client_;
-  bool sessionConnected_{ false };
+  Status flowFailure_{Status::kOk};  // first fatal status since the Session was set up
 };
 
-/** @brief NodeFactoryFn-compatible factory for GFGraphManager. */
+/** @brief NodeFactoryFn-compatible factory for the host. */
 QC::QCStatus_e CreateHcmIpcAdapterNode(QC::QCNodeType_e type,
     std::unique_ptr<QC::QCNodeIfs> & outNode);
 

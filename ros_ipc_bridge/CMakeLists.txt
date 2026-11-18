@@ -4,11 +4,9 @@
 # The ament package: one generic ROS Flow implementation whose typed factories
 # are generated from the shared Contract mapping list.
 #
-# The shared, ROS-free Adapter code lives one directory up and is pulled in with
-# add_subdirectory() so there is exactly one copy of it. Business Contract
-# schemas come from the independent qrb_contracts repository. Their generated
-# C++ is built by the Adapter's CMake integration. The shared directories also
-# build standalone with plain CMake and no ROS at all -- see ../CMakeLists.txt.
+# The ROS-free IPC Runtime and the generated Contract C++ come from the
+# qrb_ros_adapter_runtime package; this package does not depend on QCNode or
+# the HCM IPC Adapter.
 #
 # The implementation has two cohesive submodules: Bridge Manager and ROS Flow
 # Bridge. Message converters are discovered automatically and linked into the
@@ -16,6 +14,9 @@
 #
 #   qrb_ros_adapter_ros_flow_bridge  Per-Flow server, typed ROS endpoint,
 #                                    conversion and payload ownership.
+#
+# Exported targets: qrb_ros_adapter::ros_flow_bridge,
+# qrb_ros_adapter::ros_ipc_bridge_manager.
 # -----------------------------------------------------------------------------
 cmake_minimum_required(VERSION 3.16)
 project(qrb_ros_adapter VERSION 0.2.0 LANGUAGES CXX)
@@ -36,33 +37,12 @@ find_package(builtin_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(qrb_ros_adapter_runtime ${PROJECT_VERSION} REQUIRED)
 set(QRB_ROS_TRANSPORT_DEPENDENCIES
   qrb_ros_transport_point_cloud2_type)
 foreach(_transport_dependency IN LISTS QRB_ROS_TRANSPORT_DEPENDENCIES)
   find_package(${_transport_dependency} REQUIRED)
 endforeach()
-
-# --- Shared, ROS-free layers -------------------------------------------------
-
-# REALPATH first: colcon workspaces routinely reach a package through a symlink
-# (`src/<pkg>` -> the real directory), and resolving ".." on the symlinked path
-# would land outside the repository entirely.
-get_filename_component(_ros_ipc_bridge_dir "${CMAKE_CURRENT_SOURCE_DIR}" REALPATH)
-get_filename_component(_adapter_root "${_ros_ipc_bridge_dir}/.." ABSOLUTE)
-
-if(NOT EXISTS "${_adapter_root}/ipc_runtime/CMakeLists.txt")
-  message(FATAL_ERROR
-    "Could not find the shared qrb_ros_adapter layers next to ros_ipc_bridge/.\n"
-    "Expected them at: ${_adapter_root}\n"
-    "This package must stay inside the qrb_ros_adapter repository, which "
-    "also provides ipc_runtime/.")
-endif()
-
-set(QRB_CONTRACTS_SOURCE_DIR "${_adapter_root}/external/qrb_contracts" CACHE PATH
-  "Path to the independent qrb_contracts source tree")
-include("${_adapter_root}/cmake/QrbContracts.cmake")
-
-add_subdirectory("${_adapter_root}/ipc_runtime" ipc_runtime)
 
 # --- Component base ----------------------------------------------------------
 
@@ -80,9 +60,11 @@ target_include_directories(qrb_ros_adapter_ros_flow_bridge PUBLIC
   "$<INSTALL_INTERFACE:include>")
 
 target_link_libraries(qrb_ros_adapter_ros_flow_bridge PUBLIC
-  qrb_ros_adapter_runtime
-  qrb_contracts_proto)
+  qrb_ros_adapter::runtime
+  qrb_ros_adapter::contracts_proto)
 
+set_target_properties(qrb_ros_adapter_ros_flow_bridge PROPERTIES
+  EXPORT_NAME ros_flow_bridge)
 ament_target_dependencies(qrb_ros_adapter_ros_flow_bridge PUBLIC
   rclcpp
   builtin_interfaces
@@ -97,6 +79,8 @@ add_library(qrb_ros_adapter_ros_ipc_bridge_manager SHARED
   source/manager/ros_bridge_manager.cpp)
 target_link_libraries(qrb_ros_adapter_ros_ipc_bridge_manager PUBLIC
   qrb_ros_adapter_ros_flow_bridge)
+set_target_properties(qrb_ros_adapter_ros_ipc_bridge_manager PROPERTIES
+  EXPORT_NAME ros_ipc_bridge_manager)
 ament_target_dependencies(qrb_ros_adapter_ros_ipc_bridge_manager PUBLIC
   rclcpp rclcpp_components)
 
@@ -114,6 +98,7 @@ install(DIRECTORY include/ DESTINATION include)
 install(TARGETS
     qrb_ros_adapter_ros_flow_bridge
     qrb_ros_adapter_ros_ipc_bridge_manager
+  EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
@@ -122,6 +107,20 @@ install(TARGETS ros_ipc_bridge
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
-install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_dependencies(
+  rclcpp
+  rclcpp_components
+  builtin_interfaces
+  geometry_msgs
+  sensor_msgs
+  qrb_ros_adapter_runtime
+  ${QRB_ROS_TRANSPORT_DEPENDENCIES})
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  add_subdirectory(test)
+endif()
 
 ament_package()

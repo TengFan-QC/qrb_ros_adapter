@@ -16,13 +16,12 @@ constexpr std::uint32_t kTransportMagic = 0x51524241u;
 /**
  * @brief Current transport protocol version.
  *
- * Version 1 adds the DMA payload offset to the fixed wire header. Peers with a
- * different version are rejected before operation-specific parsing.
+ * Peers with a different version are rejected before operation-specific parsing.
  */
 constexpr std::uint16_t kTransportVersion = 1;
 
 /**
- * @brief Frame operations (HLD §11.3).
+ * @brief Frame operations.
  *
  * Every operation maps to exactly one payload type:
  *
@@ -68,15 +67,14 @@ namespace transport_flags
  * @brief FETCH_RESPONSE only: a Contract message is present.
  *
  * Without it the FETCH_RESPONSE payload is an OperationStatus carrying
- * NO_DATA -- the ROS IPC Bridge's bounded fresh-sample wait expired.
+ * NO_DATA -- the ROS IPC Bridge had no fresh sample when the request arrived.
  */
 constexpr std::uint32_t kHasData = 1u << 0;
 }  // namespace transport_flags
 
 /**
- * @brief Fixed-size header prefixing every frame -- HLD §9.2, which fixes the
- * field list to exactly: magic, protocol version, operation, request ID,
- * payload size, flags, fd count, DMA payload offset.
+ * @brief Fixed-size header prefixing every frame. The field list is exactly: magic, protocol
+ * version, operation, request ID, payload size, flags, fd count, DMA payload offset.
  *
  * Nothing Contract-specific is added here. A new Contract adds its descriptor
  * and converters without changing this transport header.
@@ -87,15 +85,15 @@ constexpr std::uint32_t kHasData = 1u << 0;
  */
 struct TransportHeader
 {
-  std::uint32_t magic{ kTransportMagic };
-  std::uint16_t protocolVersion{ kTransportVersion };
-  std::uint16_t operation{ 0 };
-  std::uint64_t requestId{ 0 };
-  std::uint32_t payloadSize{ 0 };
-  std::uint32_t flags{ 0 };
-  std::uint32_t fdCount{ 0 };
+  std::uint32_t magic{kTransportMagic};
+  std::uint16_t protocolVersion{kTransportVersion};
+  std::uint16_t operation{0};
+  std::uint64_t requestId{0};
+  std::uint32_t payloadSize{0};
+  std::uint32_t flags{0};
+  std::uint32_t fdCount{0};
   /** Byte offset of the logical payload within the attached DMA-BUF. */
-  std::uint64_t payloadOffset{ 0 };
+  std::uint64_t payloadOffset{0};
 };
 
 /** @brief Encoded size of TransportHeader on the wire. */
@@ -113,7 +111,7 @@ constexpr std::size_t kMaxPayloadSize = 1u << 20;
 /**
  * @brief Upper bound on fds in one frame.
  *
- * The Contracts implemented today carry at most one DMA-BUF payload fd, and
+ * The implemented Contracts carry at most one DMA-BUF payload fd, and
  * both DMA-BUF Converters reject anything but exactly one. The bound is >1
  * only so that a peer sending a malformed fdCount is rejected by validation
  * rather than by a buffer overrun in the SCM_RIGHTS control-message math.

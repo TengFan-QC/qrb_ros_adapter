@@ -42,11 +42,15 @@ Status IpcSession::Connect(const std::string & socketPath, std::chrono::millisec
     const auto now = Clock::now();
     if (now >= deadline)
       return Status::kTimeout;
-    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-    if (remaining.count() <= 0)
-      return Status::kTimeout;
+    // Round up: truncating would give up to 1 ms before the deadline.
+    const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
     std::this_thread::sleep_for(std::min(std::chrono::milliseconds(10), remaining));
   }
+}
+
+Status IpcSession::ConnectOnce(const std::string & socketPath)
+{
+  return endpoint_.ConnectOnce(socketPath);
 }
 
 Status IpcSession::SendSerialized(Operation operation,

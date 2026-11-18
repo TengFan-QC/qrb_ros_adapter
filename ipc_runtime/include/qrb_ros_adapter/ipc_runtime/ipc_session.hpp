@@ -82,6 +82,12 @@ public:
   Status Connect(const std::string & socketPath, std::chrono::milliseconds timeout);
 
   /**
+   * @brief Connect to `socketPath` in one attempt, without waiting.
+   * @return kOk, kTimeout if nothing listens there, or another failure.
+   */
+  Status ConnectOnce(const std::string & socketPath);
+
+  /**
    * @brief Send CONNECT_REQUEST for one registered Flow and await CONNECT_RESPONSE.
    *
    * @return kOk, or the Status the peer reported / the transport failure.
@@ -126,6 +132,9 @@ public:
       std::vector<OwnedFd> & fdsOut,
       std::chrono::milliseconds timeout);
 
+  /** @brief See IpcEndpoint::PeerClosed(). */
+  bool PeerClosed() const noexcept { return endpoint_.PeerClosed(); }
+
   /**
    * @brief Parse a received payload into `out`.
    * @return kOk, or kProtocolError if the bytes are not a valid encoding of
@@ -148,11 +157,10 @@ private:
       std::uint64_t payloadOffset = 0);
 
   IpcEndpoint endpoint_;
-  /** Reused serialization buffer -- one Flow sends one frame at a time, and
-   * a per-frame heap allocation on the HCM IPC Adapter's scheduling thread is
-   * exactly the kind of jitter the Graph Framework does not want. */
+  /** Reused serialization buffer: avoids a per-frame heap allocation on the
+   * host's scheduling thread. */
   std::vector<std::uint8_t> scratch_;
-  bool handshakeDone_{ false };
+  bool handshakeDone_{false};
 };
 
 }  // namespace qrb::adapter

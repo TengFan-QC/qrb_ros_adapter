@@ -15,18 +15,18 @@ namespace qrb::adapter
 
 struct OutboundPayload
 {
-  int fd{ -1 };
+  int fd{-1};
   std::shared_ptr<void> keepAlive;
-  std::uint64_t offset{ 0 };
-  bool hasPayload{ false };
+  std::uint64_t offset{0};
+  bool hasPayload{false};
 };
 
 struct InboundPayload
 {
   OwnedFd fd;
-  std::size_t capacity{ 0 };
-  std::size_t offset{ 0 };
-  bool hasPayload{ false };
+  std::size_t capacity{0};
+  std::size_t offset{0};
+  bool hasPayload{false};
 };
 
 }  // namespace qrb::adapter

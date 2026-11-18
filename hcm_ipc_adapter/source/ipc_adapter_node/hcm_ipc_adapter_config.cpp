@@ -3,7 +3,9 @@
 
 #include "qrb_ros_adapter/hcm_ipc_adapter/ipc_adapter_node/hcm_ipc_adapter_config.hpp"
 
+#include <algorithm>
 #include <array>
+#include <iterator>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <string_view>
@@ -21,41 +23,48 @@ namespace field
 constexpr char kStatic[] = "static";
 constexpr char kName[] = "name";
 constexpr char kId[] = "id";
-constexpr char kFlowId[] = "flow_id";
-constexpr char kContractTypeName[] = "contract_type_name";
+constexpr char kContractType[] = "contract_type";
 constexpr char kDirection[] = "direction";
 constexpr char kRosTopic[] = "ros_topic";
-constexpr char kBootstrapSocketPath[] = "bootstrap_socket_path";
-constexpr char kDescriptorLocalSlot[] = "descriptor_local_slot";
-constexpr char kStartupTimeoutMs[] = "startup_timeout_ms";
-constexpr char kRequestTimeoutMs[] = "request_timeout_ms";
-constexpr char kSampleTimeoutMs[] = "sample_timeout_ms";
 constexpr char kQosProfile[] = "qos_profile";
-constexpr char kQosDepth[] = "qos_depth";
-constexpr char kEnableLatencyMonitoring[] = "enable_latency_monitoring";
-constexpr char kContractTypeId[] = "contract_type_id";
-constexpr char kRosTransportMode[] = "ros_transport_mode";
-constexpr char kSocketPath[] = "socket_path";
-constexpr char kPayloadLocalSlot[] = "payload_local_slot";
+constexpr char kReliability[] = "reliability";
+constexpr char kDurability[] = "durability";
+constexpr char kDepth[] = "depth";
+constexpr char kGlobalBufferIdMap[] = "globalBufferIdMap";
 }  // namespace field
 
-constexpr std::array<const char *, 8> kRequiredOptionFields = { field::kName, field::kId,
-  field::kFlowId, field::kContractTypeName, field::kDirection, field::kRosTopic,
-  field::kBootstrapSocketPath, field::kDescriptorLocalSlot };
-constexpr std::array<const char *, 6> kOptionalOptionFields = { field::kRequestTimeoutMs,
-  field::kSampleTimeoutMs, field::kStartupTimeoutMs, field::kQosProfile, field::kQosDepth,
-  field::kEnableLatencyMonitoring };
+constexpr std::array<const char *, 4> kRequiredOptionFields = {
+    field::kName, field::kContractType, field::kDirection, field::kRosTopic};
+constexpr std::array<const char *, 3> kOptionalOptionFields = {
+    field::kId, field::kQosProfile, field::kGlobalBufferIdMap};
+constexpr std::array<const char *, 3> kQosProfileFields = {
+    field::kReliability, field::kDurability, field::kDepth};
+constexpr std::array<const char *, 2> kBufferMapEntryFields = {field::kName, field::kId};
 
-bool ParseConfiguredDirection(std::string_view text, Direction & out)
+template <std::size_t N>
+bool Contains(const std::array<const char *, N> & fields, std::string_view key)
 {
-  if (text == "ros_to_hcm") {
-    out = Direction::kRosToHcm;
+  return std::any_of(
+      fields.begin(), fields.end(), [key](const char * known) { return key == known; });
+}
+
+bool IsKnownField(std::string_view key)
+{
+  return Contains(kRequiredOptionFields, key) || Contains(kOptionalOptionFields, key);
+}
+
+/** `direction` is an integer: 0 HCM to ROS, 1 ROS to HCM. */
+bool GetRequiredDirection(const nlohmann::json & node, Direction & out, std::string & diagnostic)
+{
+  auto it = node.find(field::kDirection);
+  if (it == node.end()) {
+    diagnostic += "missing field \"direction\"; ";
+    return false;
+  }
+  if (it->is_number_integer() && ParseDirectionCode(it->get<std::int64_t>(), out)) {
     return true;
   }
-  if (text == "hcm_to_ros") {
-    out = Direction::kHcmToRos;
-    return true;
-  }
+  diagnostic += "\"direction\" must be 0 (HCM to ROS) or 1 (ROS to HCM), got " + it->dump() + "; ";
   return false;
 }
 
@@ -73,29 +82,27 @@ bool GetRequiredString(const nlohmann::json & node,
   return true;
 }
 
-bool GetRequiredUint(const nlohmann::json & node,
+bool GetOptionalString(const nlohmann::json & node,
     const char * key,
-    std::uint32_t & out,
+    std::string & out,
     std::string & diagnostic)
 {
   auto it = node.find(key);
-  if (it == node.end() || !it->is_number_unsigned()) {
-    diagnostic += std::string("missing or non-unsigned field \"") + key + "\"; ";
+  if (it == node.end())
+    return true;  // keep the default
+  if (!it->is_string()) {
+    diagnostic += std::string("\"") + key + "\" must be a string; ";
     return false;
   }
-  const std::uint64_t value = it->get<std::uint64_t>();
-  if (value > std::numeric_limits<std::uint32_t>::max()) {
-    diagnostic += std::string("field \"") + key + "\" exceeds uint32 range; ";
-    return false;
-  }
-  out = static_cast<std::uint32_t>(value);
+  out = it->get<std::string>();
   return true;
 }
 
 bool GetOptionalUint(const nlohmann::json & node,
     const char * key,
     std::uint32_t & out,
-    std::string & diagnostic)
+    std::string & diagnostic,
+    std::uint32_t max = std::numeric_limits<std::uint32_t>::max())
 {
   auto it = node.find(key);
   if (it == node.end())
@@ -105,42 +112,100 @@ bool GetOptionalUint(const nlohmann::json & node,
     return false;
   }
   const std::uint64_t value = it->get<std::uint64_t>();
-  if (value > std::numeric_limits<std::uint32_t>::max()) {
-    diagnostic += std::string("\"") + key + "\" exceeds uint32 range; ";
+  if (value > max) {
+    diagnostic += std::string("\"") + key + "\" must be in [0, " + std::to_string(max) + "]; ";
     return false;
   }
   out = static_cast<std::uint32_t>(value);
   return true;
 }
 
-bool GetOptionalBool(const nlohmann::json & node,
-    const char * key,
-    bool & out,
-    std::string & diagnostic)
+/** Parse the optional `qos_profile` object; absent members keep their default. */
+bool ParseQosProfileObject(const nlohmann::json & node, QosProfile & out, std::string & diagnostic)
 {
-  auto it = node.find(key);
+  auto it = node.find(field::kQosProfile);
   if (it == node.end())
     return true;
-  if (!it->is_boolean()) {
-    diagnostic += std::string("\"") + key + "\" must be a boolean; ";
+  if (!it->is_object()) {
+    diagnostic += "\"qos_profile\" must be an object; ";
     return false;
   }
-  out = it->get<bool>();
+  const nlohmann::json & qos = *it;
+
+  bool ok = true;
+  for (const auto & item : qos.items()) {
+    if (!Contains(kQosProfileFields, item.key())) {
+      diagnostic += "unknown field \"qos_profile." + item.key() + "\"; ";
+      ok = false;
+    }
+  }
+
+  std::string reliability = ToString(out.reliability);
+  std::string durability = ToString(out.durability);
+  ok &= GetOptionalString(qos, field::kReliability, reliability, diagnostic);
+  ok &= GetOptionalString(qos, field::kDurability, durability, diagnostic);
+  ok &= GetOptionalUint(qos, field::kDepth, out.depth, diagnostic);
+  if (!ok)
+    return false;
+
+  if (!ParseQosReliability(reliability, out.reliability)) {
+    diagnostic += "\"qos_profile.reliability\" must be \"reliable\" or \"best_effort\", got \"" +
+                  reliability + "\"; ";
+    return false;
+  }
+  if (!ParseQosDurability(durability, out.durability)) {
+    diagnostic +=
+        "\"qos_profile.durability\" must be \"volatile\" or \"transient_local\", "
+        "got \"" +
+        durability + "\"; ";
+    return false;
+  }
+  if (out.depth < kMinQosDepth || out.depth > kMaxQosDepth) {
+    diagnostic += "\"qos_profile.depth\" must be in [" + std::to_string(kMinQosDepth) + ", " +
+                  std::to_string(kMaxQosDepth) + "]; ";
+    return false;
+  }
   return true;
 }
 
-bool GetRequiredLocalSlot(const nlohmann::json & node,
-    const char * key,
+/**
+ * Parse the optional QCNode `globalBufferIdMap`. The node has one buffer, so
+ * the map has one entry; like CL2DFlex, its `name` must be non-empty and its
+ * `id` set (UINT32_MAX is QCNode's "unset").
+ */
+bool ParseGlobalBufferIdMap(const nlohmann::json & node,
     std::uint32_t & out,
     std::string & diagnostic)
 {
-  if (!GetRequiredUint(node, key, out, diagnostic))
-    return false;
-  if (out > UINT8_MAX) {
-    diagnostic += std::string("\"") + key + "\" must be in [0, 255]; ";
+  auto it = node.find(field::kGlobalBufferIdMap);
+  if (it == node.end())
+    return true;
+  if (!it->is_array() || it->size() != 1 || !(*it)[0].is_object()) {
+    diagnostic += "\"globalBufferIdMap\" must be an array of one {\"name\", \"id\"} entry; ";
     return false;
   }
-  return true;
+  const nlohmann::json & entry = (*it)[0];
+
+  bool ok = true;
+  for (const auto & item : entry.items()) {
+    if (!Contains(kBufferMapEntryFields, item.key())) {
+      diagnostic += "unknown field \"globalBufferIdMap[0]." + item.key() + "\"; ";
+      ok = false;
+    }
+  }
+  std::string name;
+  ok &= GetRequiredString(entry, field::kName, name, diagnostic);
+  if (ok && name.empty()) {
+    diagnostic += "\"globalBufferIdMap[0].name\" must not be empty; ";
+    ok = false;
+  }
+  if (entry.find(field::kId) == entry.end()) {
+    diagnostic += "missing field \"globalBufferIdMap[0].id\"; ";
+    return false;
+  }
+  ok &= GetOptionalUint(
+      entry, field::kId, out, diagnostic, std::numeric_limits<std::uint32_t>::max() - 1);
+  return ok;
 }
 
 }  // namespace
@@ -151,14 +216,18 @@ const std::string & HcmIpcAdapterConfigOptions()
     nlohmann::json schema;
     for (const char * key : kRequiredOptionFields)
       schema["required"].push_back(std::string("static.") + key);
-    for (const char * key : kOptionalOptionFields)
-      schema["optional"].push_back(std::string("static.") + key);
+    schema["optional"].push_back(std::string("static.") + field::kId);
+    for (const char * key : kQosProfileFields)
+      schema["optional"].push_back(std::string("static.") + field::kQosProfile + "." + key);
+    schema["optional"].push_back(std::string("static.") + field::kGlobalBufferIdMap);
     return schema.dump();
   }();
   return options;
 }
 
-Status ParseFlowConfigJson(const std::string & json, FlowConfig & out, std::string & diagnostic)
+Status ParseHcmIpcAdapterConfigJson(const std::string & json,
+    HcmIpcAdapterConfig & out,
+    std::string & diagnostic)
 {
   nlohmann::json root;
   try {
@@ -175,109 +244,43 @@ Status ParseFlowConfigJson(const std::string & json, FlowConfig & out, std::stri
   }
   const nlohmann::json & node = *staticIt;
 
-  FlowConfig config;
+  HcmIpcAdapterConfig config;
+  FlowConfig & flow = config.flowConfig;
   bool ok = true;
-  ok &= GetRequiredString(node, field::kFlowId, config.flowId, diagnostic);
-  ok &= GetRequiredString(node, field::kRosTopic, config.rosTopic, diagnostic);
-  ok &= GetRequiredString(node, field::kContractTypeName, config.contractTypeName, diagnostic);
 
-  std::string directionText;
-  ok &= GetRequiredString(node, field::kDirection, directionText, diagnostic);
-
-  std::string qosProfileText = ToString(config.qosProfile);
-  auto qosProfileIt = node.find(field::kQosProfile);
-  if (qosProfileIt != node.end()) {
-    if (qosProfileIt->is_string())
-      qosProfileText = qosProfileIt->get<std::string>();
-    else {
-      diagnostic += "\"qos_profile\" must be a string; ";
+  // A misspelled optional field would otherwise silently keep its default.
+  for (const auto & item : node.items()) {
+    if (!IsKnownField(item.key())) {
+      diagnostic += "unknown field \"" + item.key() + "\"; ";
       ok = false;
     }
   }
 
-  ok &= GetOptionalUint(node, field::kStartupTimeoutMs, config.startupTimeoutMs, diagnostic);
-  ok &= GetOptionalUint(node, field::kRequestTimeoutMs, config.requestTimeoutMs, diagnostic);
-  ok &= GetOptionalUint(node, field::kSampleTimeoutMs, config.sampleTimeoutMs, diagnostic);
-  ok &= GetOptionalUint(node, field::kQosDepth, config.qosDepth, diagnostic);
+  ok &= GetRequiredString(node, field::kName, config.nodeName, diagnostic);
+  ok &= GetRequiredString(node, field::kContractType, flow.contractTypeName, diagnostic);
+  ok &= GetRequiredDirection(node, flow.direction, diagnostic);
+  ok &= GetRequiredString(node, field::kRosTopic, flow.rosTopic, diagnostic);
 
-  if (node.contains(field::kContractTypeId)) {
-    diagnostic += "\"contract_type_id\" is not supported; use \"contract_type_name\"; ";
-    ok = false;
-  }
-  if (node.contains(field::kRosTransportMode)) {
-    diagnostic += "\"ros_transport_mode\" is not configurable; ";
-    ok = false;
-  }
-  if (node.contains(field::kSocketPath)) {
-    diagnostic += "\"socket_path\" is assigned by the ROS Bridge Manager; ";
-    ok = false;
-  }
+  ok &= GetOptionalUint(node, field::kId, config.nodeId, diagnostic, UINT8_MAX);
+  ok &= ParseQosProfileObject(node, flow.qosProfile, diagnostic);
+  ok &= ParseGlobalBufferIdMap(node, config.globalBufferId, diagnostic);
 
   if (!ok)
     return Status::kInvalidArgument;
 
-  if (!ParseConfiguredDirection(directionText, config.direction)) {
-    diagnostic +=
-        "\"direction\" must be \"ros_to_hcm\" or \"hcm_to_ros\", got \"" + directionText + "\"; ";
+  if (config.nodeName.empty()) {
+    diagnostic += "\"name\" must not be empty; ";
     return Status::kInvalidArgument;
   }
-  if (!ParseQosProfile(qosProfileText, config.qosProfile)) {
-    diagnostic +=
-        "\"qos_profile\" must be \"ros_default\", \"reliable\", "
-        "\"sensor_data\" or \"transient_local\", got \"" +
-        qosProfileText + "\"; ";
-    return Status::kInvalidArgument;
-  }
-  out = config;
-  return Status::kOk;
-}
+  // The QCNode name is the Flow identity seen by the ROS Bridge Manager.
+  flow.flowId = config.nodeName;
 
-Status ParseHcmIpcAdapterConfigJson(const std::string & json,
-    HcmIpcAdapterConfig & out,
-    std::string & diagnostic)
-{
-  FlowConfig flowConfig;
-  Status parsed = ParseFlowConfigJson(json, flowConfig, diagnostic);
-  if (parsed != Status::kOk)
-    return parsed;
-
-  const HcmContractBinding * binding = FindHcmContractBinding(flowConfig.contractTypeName);
+  const HcmContractBinding * binding = FindHcmContractBinding(flow.contractTypeName);
   if (binding == nullptr || binding->descriptor == nullptr) {
-    diagnostic += "contract_type_name has no HCM implementation; ";
+    diagnostic += "\"contract_type\" has no HCM implementation; ";
     return Status::kUnsupportedContract;
   }
 
-  nlohmann::json root;
-  try {
-    root = nlohmann::json::parse(json);
-  } catch (const nlohmann::json::parse_error &) {
-    return Status::kInvalidArgument;
-  }
-  const nlohmann::json & node = root.at(field::kStatic);
-
-  HcmIpcAdapterConfig config;
-  config.flowConfig = std::move(flowConfig);
-  bool ok = true;
-  ok &=
-      GetRequiredString(node, field::kBootstrapSocketPath, config.bootstrapSocketPath, diagnostic);
-  ok &= GetRequiredString(node, field::kName, config.nodeName, diagnostic);
-  ok &= GetRequiredUint(node, field::kId, config.nodeId, diagnostic);
-  ok &= GetRequiredLocalSlot(
-      node, field::kDescriptorLocalSlot, config.buffers.descriptorLocalSlot, diagnostic);
-  ok &= GetOptionalBool(
-      node, field::kEnableLatencyMonitoring, config.enableLatencyMonitoring, diagnostic);
-
-  if (node.contains(field::kPayloadLocalSlot)) {
-    diagnostic += "payload_local_slot is obsolete; native qrb_contracts descriptors use one slot; ";
-    ok = false;
-  }
-
-  if (!ok)
-    return Status::kInvalidArgument;
-  if (config.nodeName.empty() || config.nodeId > UINT8_MAX) {
-    diagnostic += "name must not be empty and id must be in [0, 255]; ";
-    return Status::kInvalidArgument;
-  }
   out = std::move(config);
   return Status::kOk;
 }

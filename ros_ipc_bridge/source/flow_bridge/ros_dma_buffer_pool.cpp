@@ -19,10 +19,10 @@ struct RosDmaBufferPool::State
   std::mutex mutex;
   std::condition_variable availableCondition;
   std::vector<std::shared_ptr<lib_mem_dmabuf::DmaBuffer>> available;
-  std::size_t allocated{ 0 };
+  std::size_t allocated{0};
   const std::size_t maxBuffers;
   const std::string heapName;
-  bool acceptingReturns{ true };
+  bool acceptingReturns{true};
 };
 
 RosDmaBufferPool::RosDmaBufferPool(std::size_t maxBuffers, std::string heapName)

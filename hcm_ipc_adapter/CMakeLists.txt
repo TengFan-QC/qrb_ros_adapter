@@ -1,46 +1,42 @@
 # -----------------------------------------------------------------------------
-# qrb_ros_adapter_hcm_ipc_adapter
+# qrb_hcm_ipc_adapter (HCM IPC Adapter)
 #
 # The HCM IPC Adapter has two cohesive submodules:
 #   IPC Adapter Node  Direct QCNodeIfs implementation and configuration.
 #   HCM Flow Client   IPC client state, synchronous requests and conversion.
 #
-# Deliberately does NOT depend on rclcpp: this code runs inside the Graph
-# Framework process, and isolating the two runtimes is HLD §2's first design
-# goal. The Adapter Node itself is the concrete QCNode implementation used by
-# GF; there is no second wrapper lifecycle.
+# Deliberately does NOT depend on rclcpp: this code runs inside the HCM
+# process, and the two runtimes stay isolated.
+#
+# Exported target: qrb_ros_adapter::hcm_ipc_adapter.
 # -----------------------------------------------------------------------------
+cmake_minimum_required(VERSION 3.16)
+project(qrb_hcm_ipc_adapter VERSION 0.2.0 LANGUAGES CXX)
 
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# Defines BUILD_TESTING (ON by default) and writes the ctest dashboard config
+# that `colcon test` expects.
+include(CTest)
+
+find_package(qrb_ros_adapter_runtime ${PROJECT_VERSION} REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(qrb_contracts REQUIRED CONFIG)
+include(cmake/QrbQcNode.cmake)
 
-if(NOT DEFINED QRB_QCNODE_INCLUDE_DIR)
-  get_filename_component(_adapter_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-  set(QRB_GF_SDK_ROOT
-    "${_adapter_root}/external/gf" CACHE PATH
-    "Path to the native Graph Framework SDK")
-  set(QRB_QCNODE_SDK_ROOT
-    "${_adapter_root}/external/qcnode_sdk" CACHE PATH
-    "Path to the native QCNode SDK")
-  set(QRB_GF_SOURCE_DIR "${_adapter_root}/../QC-Graph-Framework-Release_1_0"
-    CACHE PATH "QC Graph Framework source tree")
-  if(QRB_GF_SDK_ROOT)
-    list(PREPEND CMAKE_PREFIX_PATH "${QRB_GF_SDK_ROOT}")
-    find_package(QCGraphFramework CONFIG REQUIRED)
-    set(QRB_QCNODE_INCLUDE_DIR "${QRB_QCNODE_SDK_ROOT}/include")
-    set(QRB_GF_AVAILABLE ON)
-  else()
-    set(QRB_QCNODE_INCLUDE_DIR "${QRB_GF_SOURCE_DIR}/QcNode/include")
-  endif()
-endif()
-
-if(NOT EXISTS "${QRB_QCNODE_INCLUDE_DIR}/QC/Node/Ifs/QCNodeIfs.hpp")
-  message(FATAL_ERROR
-    "QCNode SDK headers not found. Set QRB_GF_SDK_ROOT to a native GF SDK package.")
-endif()
+# --- HCM IPC Adapter library -------------------------------------------------
 
 file(GLOB _hcm_contract_converter_sources CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/source/flow_client/*_hcm_converter.cpp")
 
+# Unversioned: hosts load the Adapter Node library by file name.
 add_library(qrb_ros_adapter_hcm_ipc_adapter SHARED
   source/flow_client/flow_context.cpp
   source/flow_client/hcm_flow_client.cpp
@@ -48,29 +44,62 @@ add_library(qrb_ros_adapter_hcm_ipc_adapter SHARED
   source/ipc_adapter_node/hcm_ipc_adapter_node.cpp
   source/flow_client/hcm_converter_registry.cpp
   ${_hcm_contract_converter_sources})
+add_library(qrb_ros_adapter::hcm_ipc_adapter ALIAS qrb_ros_adapter_hcm_ipc_adapter)
 
 target_include_directories(qrb_ros_adapter_hcm_ipc_adapter PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<BUILD_INTERFACE:${QRB_QCNODE_INCLUDE_DIR}>"
   "$<INSTALL_INTERFACE:include>")
 
 target_compile_features(qrb_ros_adapter_hcm_ipc_adapter PUBLIC cxx_std_17)
 
 target_link_libraries(qrb_ros_adapter_hcm_ipc_adapter PUBLIC
-  qrb_ros_adapter_runtime
-  qrb_contracts_proto
-  qrb_contracts_descriptors
-  nlohmann_json::nlohmann_json)
+  qrb_ros_adapter::runtime
+  qrb_ros_adapter::contracts_proto
+  qrb_contracts::qrb_contracts   # QCNode buffer descriptors, one per Contract
+  nlohmann_json::nlohmann_json
+  QCNode::QCNode)
 
-if(TARGET QCGraphFramework::QCNode)
-  target_link_libraries(qrb_ros_adapter_hcm_ipc_adapter PUBLIC
-    QCGraphFramework::QCNode)
-endif()
-
-set_target_properties(qrb_ros_adapter_hcm_ipc_adapter PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-install(DIRECTORY include/ DESTINATION include)
 target_compile_definitions(qrb_ros_adapter_hcm_ipc_adapter PUBLIC
   QC_TARGET_SOC=${QRB_QCNODE_TARGET_SOC})
 
-install(TARGETS qrb_ros_adapter_hcm_ipc_adapter DESTINATION lib)
+set_target_properties(qrb_ros_adapter_hcm_ipc_adapter PROPERTIES
+  EXPORT_NAME hcm_ipc_adapter)
+
+# --- Install and CMake package -----------------------------------------------
+
+include(CMakePackageConfigHelpers)
+set(_config_install_dir lib/cmake/${PROJECT_NAME})
+
+install(DIRECTORY include/ DESTINATION include)
+
+install(TARGETS qrb_ros_adapter_hcm_ipc_adapter
+  EXPORT ${PROJECT_NAME}Targets
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+install(EXPORT ${PROJECT_NAME}Targets
+  NAMESPACE qrb_ros_adapter::
+  DESTINATION ${_config_install_dir})
+
+configure_package_config_file(cmake/${PROJECT_NAME}Config.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+  INSTALL_DESTINATION ${_config_install_dir})
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+  COMPATIBILITY SameMinorVersion)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+    cmake/QrbQcNode.cmake
+  DESTINATION ${_config_install_dir})
+
+# --- Tests -------------------------------------------------------------------
+
+if(BUILD_TESTING)
+  find_package(GTest)
+  if(TARGET GTest::gtest_main)
+    add_subdirectory(test)
+  else()
+    message(STATUS "GTest not found, skipping HCM IPC Adapter tests")
+  endif()
+endif()

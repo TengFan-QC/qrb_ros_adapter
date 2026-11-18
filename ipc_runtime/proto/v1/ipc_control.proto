@@ -1,7 +1,7 @@
 // Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 //
-// Normative IPC control protocol -- HLD Sections 5.3 and 6.1.
+// Normative IPC control protocol.
 //
 // This file owns Adapter control messages only. Business data operations carry
 // the bound qrb.contract.* message directly, without an Adapter-owned envelope.
@@ -18,13 +18,22 @@ enum Direction {
   HCM_TO_ROS = 2;
 }
 
-// Restricted ROS QoS surface for one dynamically created Topic endpoint.
-// A zero qos_depth and ROS_DEFAULT profile select the standard ROS defaults.
-enum QosProfile {
-  QOS_PROFILE_ROS_DEFAULT = 0;
-  QOS_PROFILE_RELIABLE = 1;
-  QOS_PROFILE_SENSOR_DATA = 2;
-  QOS_PROFILE_TRANSIENT_LOCAL = 3;
+enum QosReliability {
+  QOS_RELIABILITY_RELIABLE = 0;
+  QOS_RELIABILITY_BEST_EFFORT = 1;
+}
+
+enum QosDurability {
+  QOS_DURABILITY_VOLATILE = 0;
+  QOS_DURABILITY_TRANSIENT_LOCAL = 1;
+}
+
+// ROS QoS of one dynamically created Topic endpoint: reliability, durability
+// and KEEP_LAST depth; every other policy keeps the rclcpp default.
+message QosProfile {
+  QosReliability reliability = 1;
+  QosDurability durability = 2;
+  uint32 depth = 3;
 }
 
 enum StatusCode {
@@ -49,11 +58,12 @@ message RegisterFlowRequest {
   string contract_type_name = 2;
   Direction direction = 3;
   string ros_topic = 4;
-  uint32 request_timeout_ms = 5;
-  uint32 sample_timeout_ms = 6;
+  reserved 6, 8, 9;
+  reserved "sample_timeout_ms", "qos_depth";
+  // Longest one processed frame may block (FlowConfig::timeoutMs).
+  uint32 timeout_ms = 5;
   uint32 startup_timeout_ms = 7;
-  QosProfile qos_profile = 8;
-  uint32 qos_depth = 9;
+  QosProfile qos_profile = 10;
 }
 
 message RegisterFlowResponse {

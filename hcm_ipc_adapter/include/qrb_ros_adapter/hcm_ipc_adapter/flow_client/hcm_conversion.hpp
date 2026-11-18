@@ -13,8 +13,8 @@ namespace qrb::adapter
 /** @brief Read-only mapping of a received DMA-BUF. */
 struct DmaBufView
 {
-  const void * data{ nullptr };
-  std::size_t size{ 0 };
+  const void * data{nullptr};
+  std::size_t size{0};
 };
 
 /** @brief Convert a Contract and optional external payload to an HCM descriptor. */

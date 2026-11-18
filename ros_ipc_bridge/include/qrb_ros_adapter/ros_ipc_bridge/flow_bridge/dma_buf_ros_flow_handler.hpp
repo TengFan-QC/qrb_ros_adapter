@@ -41,44 +41,26 @@ class DmaBufRosFlowHandler final : public TypedRosFlowHandler<ContractT>
       "rclcpp::TypeAdapter");
 
 public:
-  DmaBufRosFlowHandler(int defaultPoolSize, std::string heapName = "/dev/dma_heap/system")
-    : defaultPoolSize_(defaultPoolSize), heapName_(std::move(heapName))
+  explicit DmaBufRosFlowHandler(std::string heapName = "/dev/dma_heap/system")
+    : heapName_(std::move(heapName))
   {
   }
 
-  Status Open(rclcpp::Node & node, const FlowConfig & config, std::string & diagnostic) override
+  Status Open(rclcpp::Node & node, const FlowConfig & config, std::string &) override
   {
-    if (defaultPoolSize_ <= 0) {
-      diagnostic += "ROS DMA-BUF pool size must be positive; ";
-      return Status::kInvalidArgument;
-    }
-    const int configuredPoolSize =
-        node.declare_parameter<int>("ros_dma_buffer_pool_size", defaultPoolSize_);
-    if (configuredPoolSize <= 0) {
-      diagnostic += "ros_dma_buffer_pool_size must be positive; ";
-      return Status::kInvalidArgument;
-    }
-    const std::size_t effectiveDepth = ResolveQosDepth(config.qosDepth);
-    if (config.direction == Direction::kHcmToRos &&
-        effectiveDepth >= static_cast<std::size_t>(configuredPoolSize)) {
-      diagnostic +=
-          "effective qos_depth must be smaller than "
-          "ros_dma_buffer_pool_size for HCM_TO_ROS DMA-BUF flows; ";
-      return Status::kInvalidArgument;
-    }
-
     config_ = config;
     const rclcpp::QoS qos = MakeRosQos(config);
     if (config.direction == Direction::kRosToHcm) {
       subscription_ = node.create_subscription<RosMessageT>(config.rosTopic, qos,
           [this](std::shared_ptr<RosMessageT> message) { latest_.Store(std::move(message)); });
     } else {
-      pool_ = std::make_unique<RosDmaBufferPool>(
-          static_cast<std::size_t>(configuredPoolSize), heapName_);
+      pool_ =
+          std::make_unique<RosDmaBufferPool>(RosDmaBufferPoolSize(config.qosProfile), heapName_);
       publisher_ = node.create_publisher<RosMessageT>(config.rosTopic, qos);
     }
-    RCLCPP_INFO(node.get_logger(), "ROS endpoint QoS: profile=%s, depth=%zu",
-        ToString(config.qosProfile), ResolveQosDepth(config.qosDepth));
+    RCLCPP_INFO(node.get_logger(), "ROS endpoint QoS: %s, %s, depth=%u",
+        ToString(config.qosProfile.reliability), ToString(config.qosProfile.durability),
+        config.qosProfile.depth);
     return Status::kOk;
   }
 
@@ -92,20 +74,17 @@ public:
     pool_.reset();
   }
 
-  void CancelPendingFetch() noexcept override { latest_.Shutdown(); }
-
 protected:
   Status FetchTyped(ContractT & target,
       OutboundPayload & outPayload,
-      std::string & diagnostic,
-      std::chrono::milliseconds sampleTimeout) override
+      std::string & diagnostic) override
   {
     outPayload = OutboundPayload{};
     if (subscription_ == nullptr)
       return Status::kBadState;
 
     std::shared_ptr<RosMessageT> message;
-    if (!latest_.WaitAndTake(message, sampleTimeout))
+    if (!latest_.Take(message))
       return Status::kNoData;
 
     if (message == nullptr) {
@@ -188,7 +167,7 @@ private:
       return Status::kBadState;
     }
 
-    destination = pool_->Acquire(size, std::chrono::milliseconds(config_.requestTimeoutMs));
+    destination = pool_->Acquire(size, std::chrono::milliseconds(config_.timeoutMs));
     if (destination == nullptr) {
       diagnostic += "ROS DMA-BUF pool acquisition timed out or allocation failed; ";
       return Status::kResourceError;
@@ -221,7 +200,6 @@ private:
     return Status::kOk;
   }
 
-  int defaultPoolSize_;
   std::string heapName_;
   FlowConfig config_;
   typename rclcpp::Subscription<RosMessageT>::SharedPtr subscription_;

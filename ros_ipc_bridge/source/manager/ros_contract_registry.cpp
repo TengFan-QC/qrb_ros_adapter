@@ -31,8 +31,7 @@ std::shared_ptr<RosFlowBridgeBase> CreateTypedRosFlowBridge(const char * nodeNam
     handler = std::make_unique<InlineRosFlowHandler<RosMessageT, ContractT>>();
   } else {
     static_assert(Payload == PayloadClass::kDmaBuf);
-    handler = std::make_unique<DmaBufRosFlowHandler<RosMessageT, ContractT>>(
-        kDefaultRosDmaBufferPoolSize);
+    handler = std::make_unique<DmaBufRosFlowHandler<RosMessageT, ContractT>>();
   }
   return std::make_shared<RosFlowBridgeBase>(
       nodeName, options, contractTypeName, std::move(handler), std::move(terminalCallback));
@@ -54,7 +53,7 @@ std::shared_ptr<RosFlowBridgeBase> CreateTypedRosFlowBridge(const char * nodeNam
 const RosContractBinding kRosBindings[] = {
 #define QRB_CONTRACT_MAPPING(                                                                      \
     Id, TypeName, Payload, ContractT, HcmDescriptorT, RosMessageT, NodeName)                       \
-  { FindContractDescriptor(TypeName), NodeName, &Create##Id##RosFlowBridge },
+  {FindContractDescriptor(TypeName), NodeName, &Create##Id##RosFlowBridge},
 #include "qrb_ros_adapter/ipc_runtime/contract_mappings.def"
 #undef QRB_CONTRACT_MAPPING
 };

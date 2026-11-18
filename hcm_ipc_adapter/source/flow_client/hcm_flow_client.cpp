@@ -33,8 +33,8 @@ std::chrono::milliseconds Remaining(Clock::time_point deadline)
   const auto now = Clock::now();
   if (now >= deadline)
     return std::chrono::milliseconds(0);
-  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-  return remaining.count() > 0 ? remaining : std::chrono::milliseconds(1);
+  // Round up so a wait never ends before the deadline.
+  return std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
 }
 
 Status QueryDmaBufSize(int fd, std::uint64_t & outSize)
@@ -55,7 +55,7 @@ Status BeginCpuRead(int fd)
 {
   if (fd < 0)
     return Status::kOk;
-  dma_buf_sync sync{ DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+  dma_buf_sync sync{DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ};
   if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
     return Status::kOk;
   }
@@ -66,7 +66,7 @@ Status EndCpuRead(int fd)
 {
   if (fd < 0)
     return Status::kOk;
-  dma_buf_sync sync{ DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
+  dma_buf_sync sync{DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ};
   if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
     return Status::kOk;
   }
@@ -77,7 +77,7 @@ Status BeginCpuWrite(int fd)
 {
   if (fd < 0)
     return Status::kOk;
-  dma_buf_sync sync{ DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE };
+  dma_buf_sync sync{DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE};
   if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
     return Status::kOk;
   }
@@ -88,7 +88,7 @@ Status EndCpuWrite(int fd)
 {
   if (fd < 0)
     return Status::kOk;
-  dma_buf_sync sync{ DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE };
+  dma_buf_sync sync{DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE};
   if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
     return Status::kOk;
   }
@@ -213,11 +213,17 @@ Status HcmFlowClient::Initialize(const FlowConfig & config,
 
 Status HcmFlowClient::RegisterManagedFlow(Deadline deadline, std::string & diagnostic)
 {
+  // The ROS Bridge Manager must already run: one attempt, no waiting for it.
   IpcSession bootstrap;
-  Status connected = bootstrap.Connect(bootstrapSocketPath_, Remaining(deadline));
+  Status connected = bootstrap.ConnectOnce(bootstrapSocketPath_);
+  if (connected == Status::kTimeout) {
+    diagnostic +=
+        "ROS Bridge Manager is not running: nothing listens on " + bootstrapSocketPath_ + "; ";
+    return Status::kResourceError;
+  }
   if (connected != Status::kOk) {
-    diagnostic += "ROS Bridge Manager bootstrap connection timed out; ";
-    return Status::kTimeout;
+    diagnostic += "ROS Bridge Manager bootstrap connection failed; ";
+    return connected;
   }
 
   ipc_proto::RegisterFlowRequest request;
@@ -226,11 +232,9 @@ Status HcmFlowClient::RegisterManagedFlow(Deadline deadline, std::string & diagn
   request.set_contract_type_name(config.contractTypeName);
   request.set_direction(ToProtoDirection(config.direction));
   request.set_ros_topic(config.rosTopic);
-  request.set_request_timeout_ms(config.requestTimeoutMs);
-  request.set_sample_timeout_ms(config.sampleTimeoutMs);
+  request.set_timeout_ms(config.timeoutMs);
   request.set_startup_timeout_ms(config.startupTimeoutMs);
-  request.set_qos_profile(ToProtoQosProfile(config.qosProfile));
-  request.set_qos_depth(config.qosDepth);
+  ToProtoQosProfile(config.qosProfile, *request.mutable_qos_profile());
 
   Status sent = bootstrap.SendProtoFrame(Operation::kRegisterFlowRequest, 1, request);
   if (sent != Status::kOk)
@@ -263,7 +267,7 @@ Status HcmFlowClient::RegisterManagedFlow(Deadline deadline, std::string & diagn
   }
   managerRegistered_ = true;
   Status assigned = context_.AssignRegistration(
-      FlowRegistration{ response.data_socket_path(), response.instance_token() });
+      FlowRegistration{response.data_socket_path(), response.instance_token()});
   if (assigned != Status::kOk)
     return assigned;
   return Status::kOk;
@@ -275,9 +279,9 @@ void HcmFlowClient::UnregisterManagedFlow()
     return;
   managerRegistered_ = false;
 
+  // Without a running Manager there is no registration left to remove.
   IpcSession bootstrap;
-  Status connected = bootstrap.Connect(bootstrapSocketPath_, std::chrono::milliseconds(200));
-  if (connected != Status::kOk)
+  if (bootstrap.ConnectOnce(bootstrapSocketPath_) != Status::kOk)
     return;
 
   ipc_proto::UnregisterFlowRequest request;
@@ -309,6 +313,20 @@ Status HcmFlowClient::Fail(Status reason, const std::string & diagnostic)
   return reason;
 }
 
+Status HcmFlowClient::RejectFetched(std::uint64_t requestId,
+    Status reason,
+    const std::string & diagnostic)
+{
+  if (context_.Descriptor()->payloadClass == PayloadClass::kDmaBuf) {
+    Status completed =
+        session_.SendStatusResponse(Operation::kFetchComplete, requestId, reason, diagnostic);
+    if (completed != Status::kOk)
+      return Fail(completed, "FETCH_COMPLETE send failed");
+    ++context_.framesOut;
+  }
+  return reason;
+}
+
 Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
 {
   if (context_.Descriptor() == nullptr || context_.Registration().dataSocketPath.empty() ||
@@ -332,11 +350,9 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
   std::vector<std::uint8_t> payload;
   std::vector<OwnedFd> fds;
   for (;;) {
-    const auto responseTimeout =
-        RequestTimeout() + std::chrono::milliseconds(context_.Config().sampleTimeoutMs);
-    Status received = session_.ReceiveFrame(header, payload, fds, responseTimeout);
+    Status received = session_.ReceiveFrame(header, payload, fds, Timeout());
     if (received != Status::kOk) {
-      return Fail(received, "no FETCH_RESPONSE within sample_timeout_ms + request_timeout_ms");
+      return Fail(received, "no FETCH_RESPONSE within timeout_ms");
     }
     ++context_.framesIn;
 
@@ -354,7 +370,7 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
 
   if ((header.flags & transport_flags::kHasData) == 0) {
     // NO_DATA is a completed request, not a transport failure. Keep the
-    // Session alive so a later GF invocation can fetch the next sample.
+    // Session alive so a later host invocation can fetch the next sample.
     ipc_proto::OperationStatus status;
     if (IpcSession::ParseProtoPayload(payload, status) != Status::kOk) {
       return Fail(Status::kProtocolError, "malformed no-data FETCH_RESPONSE");
@@ -370,6 +386,12 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
       ++context_.noDataResponses;
       return Status::kNoData;
     }
+    if (IsFrameError(peerStatus)) {
+      // The bridge could not convert its sample: it dropped that sample
+      // and keeps serving this Session.
+      ++context_.conversionErrors;
+      return peerStatus;
+    }
     return Fail(peerStatus, "ROS IPC Bridge rejected fetch: " + status.diagnostic_message());
   }
 
@@ -384,9 +406,8 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
   bool cpuReadStarted = false;
 
   if (isDmaBuf) {
-    // Exactly one payload fd. Both DMA-BUF Contracts carry a single buffer,
-    // so any other count is a protocol error rather than something to
-    // interpret.
+    // Both DMA-BUF Contracts carry a single buffer, so any other fd count
+    // is a protocol error.
     if (header.fdCount != 1 || fds.size() != 1) {
       return Fail(Status::kProtocolError, "DMA-BUF contract requires exactly one fd");
     }
@@ -431,9 +452,9 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
     if (cpuReadStarted)
       EndCpuRead(fds[0].Get());
     ::munmap(mappedAddress, mappedSize);
-    return Fail(Status::kInvalidArgument,
-        "GF descriptor does not provide a writable local "
-        "DMA-BUF");
+    fds[0].Reset();
+    return RejectFetched(requestId, Status::kInvalidArgument,
+        "HCM descriptor does not provide a writable local DMA-BUF");
   }
   Status targetSync = isDmaBuf ? BeginCpuWrite(targetFd) : Status::kOk;
   if (targetSync != Status::kOk) {
@@ -441,7 +462,7 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
       EndCpuRead(fds[0].Get());
     if (mappedAddress != MAP_FAILED)
       ::munmap(mappedAddress, mappedSize);
-    return Fail(targetSync, "failed to begin GF descriptor DMA-BUF CPU write");
+    return Fail(targetSync, "failed to begin HCM descriptor DMA-BUF CPU write");
   }
 
   ConversionResult converted = binding_->contractToHcm(*contractMessage_, view, target);
@@ -459,19 +480,20 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
   }
 
   if (targetCleanup != Status::kOk) {
-    return Fail(targetCleanup, "failed to finish GF descriptor DMA-BUF CPU write");
+    return Fail(targetCleanup, "failed to finish HCM descriptor DMA-BUF CPU write");
   }
 
   if (!converted) {
+    // For example a sample larger than the host's buffer: drop this one.
     ++context_.conversionErrors;
-    return Fail(
-        Status::kConversionError, "Contract-to-HCM conversion failed: " + converted.Diagnostic());
+    return RejectFetched(requestId, Status::kConversionError,
+        "Contract-to-HCM conversion failed: " + converted.Diagnostic());
   }
 
   if (isDmaBuf) {
     // The ROS peer retains the producer's shared Buffer until this
     // completion arrives, preventing its pool from reusing the storage
-    // while the copy into the GF-owned destination is in progress.
+    // while the copy into the host-owned destination is in progress.
     Status completed =
         session_.SendStatusResponse(Operation::kFetchComplete, requestId, Status::kOk, "");
     if (completed != Status::kOk) {
@@ -499,30 +521,28 @@ Status HcmFlowClient::Publish(const QC::Memory::QCBufferDescriptorBase_t & sourc
   const bool isDmaBuf = context_.Descriptor()->payloadClass == PayloadClass::kDmaBuf;
   int sourceFd = -1;
   const QC::Memory::BufferDescriptor_t * sourceBuffer = nullptr;
+  // Frame errors before PUBLISH_REQUEST is sent drop only this frame.
   if (isDmaBuf && !LocalDmaBuffer(source, sourceBuffer, sourceFd)) {
-    return Fail(Status::kInvalidArgument,
-        "GF descriptor does not provide a readable local "
-        "DMA-BUF");
+    return Status::kInvalidArgument;  // no readable local DMA-BUF
   }
   if (isDmaBuf && (sourceBuffer->offset > sourceBuffer->size || sourceBuffer->validSize == 0 ||
                       sourceBuffer->validSize > sourceBuffer->size - sourceBuffer->offset)) {
-    return Fail(Status::kInvalidArgument, "GF descriptor has an invalid payload size");
+    return Status::kInvalidArgument;  // invalid payload size
   }
 
   Status sourceSync = isDmaBuf ? BeginCpuRead(sourceFd) : Status::kOk;
   if (sourceSync != Status::kOk) {
-    return Fail(sourceSync, "failed to begin GF descriptor DMA-BUF CPU read");
+    return Fail(sourceSync, "failed to begin HCM descriptor DMA-BUF CPU read");
   }
 
   ConversionResult converted = binding_->hcmToContract(source, *contractMessage_);
   Status sourceCleanup = isDmaBuf ? EndCpuRead(sourceFd) : Status::kOk;
   if (sourceCleanup != Status::kOk) {
-    return Fail(sourceCleanup, "failed to finish GF descriptor DMA-BUF CPU read");
+    return Fail(sourceCleanup, "failed to finish HCM descriptor DMA-BUF CPU read");
   }
   if (!converted) {
     ++context_.conversionErrors;
-    return Fail(
-        Status::kConversionError, "HCM-to-Contract conversion failed: " + converted.Diagnostic());
+    return Status::kConversionError;
   }
 
   const std::uint64_t requestId = context_.NextRequestId();
@@ -540,9 +560,9 @@ Status HcmFlowClient::Publish(const QC::Memory::QCBufferDescriptorBase_t & sourc
   std::vector<std::uint8_t> payload;
   std::vector<OwnedFd> fds;
   for (;;) {
-    Status received = session_.ReceiveFrame(header, payload, fds, RequestTimeout());
+    Status received = session_.ReceiveFrame(header, payload, fds, Timeout());
     if (received != Status::kOk) {
-      return Fail(received, "no PUBLISH_RESPONSE within request_timeout_ms");
+      return Fail(received, "no PUBLISH_RESPONSE within timeout_ms");
     }
     ++context_.framesIn;
 
@@ -566,6 +586,9 @@ Status HcmFlowClient::Publish(const QC::Memory::QCBufferDescriptorBase_t & sourc
   Status peerStatus = FromProtoStatusCode(status.status());
   if (peerStatus != Status::kOk) {
     ++context_.conversionErrors;
+    // The bridge dropped this frame and keeps serving the Session.
+    if (IsFrameError(peerStatus))
+      return peerStatus;
     return Fail(peerStatus, "ROS IPC Bridge rejected publish: " + status.diagnostic_message());
   }
 

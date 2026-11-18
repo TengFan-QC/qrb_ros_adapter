@@ -28,15 +28,24 @@ using HcmToContractFunction = ConversionResult (*)(
 using HcmDescriptorFactory = std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> (*)(
     QC::QCBufferType_e);
 
+/**
+ * @brief QCNode custom descriptor type range assigned to Contracts in registration order.
+ *
+ * QCNode provides QC_BUFFER_TYPE_CUSTOM_0..CUSTOM_4; QC_BUFFER_TYPE_LAST marks
+ * the end of the range.
+ */
+inline constexpr QC::QCBufferType_e kHcmCustomDescriptorTypeBegin = QC::QC_BUFFER_TYPE_CUSTOM_0;
+inline constexpr QC::QCBufferType_e kHcmCustomDescriptorTypeEnd = QC::QC_BUFFER_TYPE_LAST;
+
 /** @brief HCM-side implementation registered for one shared Contract Descriptor. */
 struct HcmContractBinding
 {
-  const ContractDescriptor * descriptor{ nullptr };
-  HcmDescriptorMatcher acceptsDescriptor{ nullptr };
-  ContractToHcmFunction contractToHcm{ nullptr };
-  HcmToContractFunction hcmToContract{ nullptr };
-  QC::QCBufferType_e descriptorType{ QC::QC_BUFFER_TYPE_MAX };
-  HcmDescriptorFactory createDescriptor{ nullptr };
+  const ContractDescriptor * descriptor{nullptr};
+  HcmDescriptorMatcher acceptsDescriptor{nullptr};
+  ContractToHcmFunction contractToHcm{nullptr};
+  HcmToContractFunction hcmToContract{nullptr};
+  QC::QCBufferType_e descriptorType{QC::QC_BUFFER_TYPE_MAX};
+  HcmDescriptorFactory createDescriptor{nullptr};
 };
 
 template <typename DescriptorT>
@@ -90,20 +99,20 @@ std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> CreateHcmDescriptor(
 template <typename ContractT, typename DescriptorT>
 HcmContractBinding MakeHcmContractBinding()
 {
-  return { FindContractDescriptor(ContractT::descriptor()->full_name()),
-    &AcceptsHcmDescriptor<DescriptorT>, &InvokeContractToHcm<ContractT, DescriptorT>,
-    &InvokeHcmToContract<ContractT, DescriptorT>, QC::QC_BUFFER_TYPE_MAX,
-    &CreateHcmDescriptor<DescriptorT> };
+  return {FindContractDescriptor(ContractT::descriptor()->full_name()),
+      &AcceptsHcmDescriptor<DescriptorT>, &InvokeContractToHcm<ContractT, DescriptorT>,
+      &InvokeHcmToContract<ContractT, DescriptorT>, QC::QC_BUFFER_TYPE_MAX,
+      &CreateHcmDescriptor<DescriptorT>};
 }
 
 std::size_t HcmContractBindingCount();
 const HcmContractBinding * HcmContractBindingAt(std::size_t index);
 const HcmContractBinding * FindHcmContractBinding(std::string_view contractTypeName);
 
-/** @brief Return the automatically assigned GF buffer type for a Contract. */
+/** @brief Return the automatically assigned QCNode buffer type for a Contract. */
 QC::QCBufferType_e GetQrbBufferDescriptorType(std::string_view contractTypeName);
 
-/** @brief GF descriptor factory covering every registered qrb_contracts type. */
+/** @brief Descriptor factory covering every registered qrb_contracts type. */
 QC::QCStatus_e CreateQrbBufferDescriptor(QC::QCBufferType_e type,
     std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> & outDescriptor);
 
