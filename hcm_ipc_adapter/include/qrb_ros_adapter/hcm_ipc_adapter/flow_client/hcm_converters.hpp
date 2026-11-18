@@ -25,11 +25,10 @@ using ContractToHcmFunction = ConversionResult (*)(const google::protobuf::Messa
 using HcmToContractFunction = ConversionResult (*)(
     const QC::Memory::QCBufferDescriptorBase_t & source,
     google::protobuf::MessageLite & target);
-using HcmDescriptorFactory = std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> (*)(
-    QC::QCBufferType_e);
+using HcmDescriptorFactory = std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> (*)();
 
 /**
- * @brief QCNode custom descriptor type range assigned to Contracts in registration order.
+ * @brief QCNode custom descriptor type range used by the qrb_contracts descriptors.
  *
  * QCNode provides QC_BUFFER_TYPE_CUSTOM_0..CUSTOM_4; QC_BUFFER_TYPE_LAST marks
  * the end of the range.
@@ -88,12 +87,9 @@ ConversionResult InvokeHcmToContract(const QC::Memory::QCBufferDescriptorBase_t 
 }
 
 template <typename DescriptorT>
-std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> CreateHcmDescriptor(
-    QC::QCBufferType_e descriptorType)
+std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> CreateHcmDescriptor()
 {
-  auto descriptor = std::make_unique<DescriptorT>();
-  descriptor->type = descriptorType;
-  return descriptor;
+  return std::make_unique<DescriptorT>();
 }
 
 template <typename ContractT, typename DescriptorT>
@@ -101,7 +97,7 @@ HcmContractBinding MakeHcmContractBinding()
 {
   return {FindContractDescriptor(ContractT::descriptor()->full_name()),
       &AcceptsHcmDescriptor<DescriptorT>, &InvokeContractToHcm<ContractT, DescriptorT>,
-      &InvokeHcmToContract<ContractT, DescriptorT>, QC::QC_BUFFER_TYPE_MAX,
+      &InvokeHcmToContract<ContractT, DescriptorT>, DescriptorT().type,
       &CreateHcmDescriptor<DescriptorT>};
 }
 
@@ -109,7 +105,12 @@ std::size_t HcmContractBindingCount();
 const HcmContractBinding * HcmContractBindingAt(std::size_t index);
 const HcmContractBinding * FindHcmContractBinding(std::string_view contractTypeName);
 
-/** @brief Return the automatically assigned QCNode buffer type for a Contract. */
+/**
+ * @brief Return the QCNode buffer type of a Contract's descriptor.
+ *
+ * The type is the one the qrb_contracts descriptor sets for itself, so a frame
+ * built by any QCNode keeps it across descriptor copies.
+ */
 QC::QCBufferType_e GetQrbBufferDescriptorType(std::string_view contractTypeName);
 
 /** @brief Descriptor factory covering every registered qrb_contracts type. */

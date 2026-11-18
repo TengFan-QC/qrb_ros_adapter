@@ -106,7 +106,8 @@ struct HcmProbeSample<adapter::PoseHcmDescriptor>
 
   static HcmStampResult Stamp(Descriptor & pose, HcmSenderState & state, std::uint64_t sequence)
   {
-    pose.frameId = kFrameId;
+    if (pose.frameId != kFrameId)
+      (void)pose.frameId.Assign(kFrameId);  // fits FrameId_t
     pose.poseWithCovariance.pose.position.x = 0.0;
     pose.poseWithCovariance.pose.position.y = 0.0;
     pose.poseWithCovariance.pose.position.z = 0.0;
@@ -182,17 +183,18 @@ struct HcmProbeSample<adapter::PointCloudHcmDescriptor>
     cloud.height = 1;
     cloud.width = static_cast<std::uint32_t>(bytes / kPointStep);
     if (!HasSenderFields(cloud)) {
-      cloud.fields.clear();
+      cloud.numFields = static_cast<std::uint32_t>(kFieldCount);
       for (std::size_t i = 0; i < kFieldCount; ++i)
-        cloud.fields.emplace_back(kFieldNames[i], static_cast<std::uint32_t>(i * 4),
-            QRB::Memory::POINT_FIELD_TYPE_FLOAT32, 1);
+        cloud.fields[i] = QRB::Memory::PointField_t(kFieldNames[i],
+            static_cast<std::uint32_t>(i * 4), QRB::Memory::POINT_FIELD_TYPE_FLOAT32, 1);
     }
     cloud.isBigEndian = false;
     cloud.pointStep = kPointStep;
     cloud.rowStep = static_cast<std::uint32_t>(bytes);
     cloud.isDense = true;
     cloud.timestampNs = now;
-    cloud.frameId = kFrameId;
+    if (cloud.frameId != kFrameId)
+      (void)cloud.frameId.Assign(kFrameId);  // fits FrameId_t
     return HcmStampResult::kOk;
   }
 
@@ -225,7 +227,7 @@ struct HcmProbeSample<adapter::PointCloudHcmDescriptor>
 private:
   static bool HasSenderFields(const Descriptor & cloud)
   {
-    if (cloud.fields.size() != kFieldCount)
+    if (cloud.numFields != kFieldCount)
       return false;
     for (std::size_t i = 0; i < kFieldCount; ++i) {
       const QRB::Memory::PointField_t & field = cloud.fields[i];

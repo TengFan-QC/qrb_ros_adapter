@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "qrb_ros_adapter/ipc_runtime/contract_validation.hpp"
-#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/ros_contract_time.hpp"
+#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/ros_contract_header.hpp"
 
 namespace qrb::adapter
 {
@@ -107,16 +107,8 @@ ConversionResult FillContractMetadata(const std_msgs::msg::Header & header,
     PointCloudRosContract & target,
     std::uint64_t & payloadSize)
 {
-  std::uint64_t timestampNs = 0;
-  ConversionResult time = StampToContractNanos(header.stamp, timestampNs);
-  if (!time) {
-    return ConversionResult::Failure(
-        "header.stamp cannot be represented as timestamp_ns: " + time.Diagnostic());
-  }
-
   target.Clear();
-  target.set_timestamp_ns(timestampNs);
-  target.set_frame_id(header.frame_id);
+  HeaderToContract(header, *target.mutable_header());
   target.set_height(height);
   target.set_width(width);
   target.set_is_bigendian(isBigendian);
@@ -150,12 +142,7 @@ ConversionResult FillRosMetadata(const PointCloudRosContract & source,
     bool & isDense,
     std::vector<PointFieldRosMessage> & fields)
 {
-  ConversionResult time = ContractNanosToStamp(source.timestamp_ns(), header.stamp);
-  if (!time) {
-    return ConversionResult::Failure(
-        "timestamp_ns cannot be represented as a ROS stamp: " + time.Diagnostic());
-  }
-  header.frame_id = source.frame_id();
+  HeaderToRos(source.header(), header);
   height = source.height();
   width = source.width();
   isBigendian = source.is_bigendian();

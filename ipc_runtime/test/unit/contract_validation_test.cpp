@@ -20,9 +20,9 @@ namespace
 geometry_proto::PoseWithCovarianceStamped MakePose()
 {
   geometry_proto::PoseWithCovarianceStamped pose;
-  pose.set_timestamp_ns(1);
-  pose.set_frame_id("map");
-  auto * value = pose.mutable_pose_with_covariance();
+  pose.mutable_header()->mutable_stamp()->set_sec(1);
+  pose.mutable_header()->set_frame_id("map");
+  auto * value = pose.mutable_pose();
   value->mutable_pose()->mutable_position()->set_x(1.0);
   value->mutable_pose()->mutable_orientation()->set_w(1.0);
   return pose;
@@ -32,7 +32,7 @@ geometry_proto::PoseWithCovarianceStamped MakePose()
 sensor_proto::PointCloud2 MakeCloud()
 {
   sensor_proto::PointCloud2 cloud;
-  cloud.set_frame_id("lidar");
+  cloud.mutable_header()->set_frame_id("lidar");
   cloud.set_height(2);
   cloud.set_width(4);
   cloud.set_point_step(16);
@@ -64,7 +64,7 @@ TEST(ContractValidation, RejectsInvalidPosesAndLayoutsThePayloadCannotBack)
   geometry_proto::PoseWithCovarianceStamped full = MakePose();
   EXPECT_TRUE(ValidatePoseWithCovarianceStamped(full));
   for (int i = 0; i < 36; ++i)
-    full.mutable_pose_with_covariance()->add_covariance(0.1);
+    full.mutable_pose()->add_covariance(0.1);
   EXPECT_TRUE(ValidatePoseWithCovarianceStamped(full));
 
   using Pose = geometry_proto::PoseWithCovarianceStamped;
@@ -75,20 +75,21 @@ TEST(ContractValidation, RejectsInvalidPosesAndLayoutsThePayloadCannotBack)
   } cases[] = {
       {"NonFinitePosition",
           [](Pose & p) {
-            p.mutable_pose_with_covariance()->mutable_pose()->mutable_position()->set_y(
+            p.mutable_pose()->mutable_pose()->mutable_position()->set_y(
                 std::numeric_limits<double>::quiet_NaN());
           }},
       {"ZeroQuaternion",
-          [](Pose & p) {
-            p.mutable_pose_with_covariance()->mutable_pose()->mutable_orientation()->set_w(0.0);
-          }},
+          [](Pose & p) { p.mutable_pose()->mutable_pose()->mutable_orientation()->set_w(0.0); }},
       {"PartialCovariance",
           [](Pose & p) {
             for (int i = 0; i < 35; ++i) {
-              p.mutable_pose_with_covariance()->add_covariance(0);
+              p.mutable_pose()->add_covariance(0);
             }
           }},
-      {"AbsoluteFrameId", [](Pose & p) { p.set_frame_id("/map"); }},
+      {"MissingPose", [](Pose & p) { p.clear_pose(); }},
+      {"AbsoluteFrameId", [](Pose & p) { p.mutable_header()->set_frame_id("/map"); }},
+      {"NanosecOverflow",
+          [](Pose & p) { p.mutable_header()->mutable_stamp()->set_nanosec(1000000000U); }},
   };
   for (const auto & c : cases) {
     SCOPED_TRACE(c.name);
@@ -111,6 +112,9 @@ TEST(ContractValidation, RejectsInvalidPosesAndLayoutsThePayloadCannotBack)
     std::uint64_t payloadBytes;
   } clouds[] = {
       {"PayloadTooSmall", [](Cloud &) {}, kCloudBytes - 1},
+      {"NanosecOverflow",
+          [](Cloud & c) { c.mutable_header()->mutable_stamp()->set_nanosec(1000000000U); },
+          kCloudBytes},
       {"WidthOverflow", [](Cloud & c) { c.set_width(std::numeric_limits<std::uint32_t>::max()); },
           std::numeric_limits<std::uint64_t>::max()},
       {"FieldBeyondPointStep", [](Cloud & c) { c.mutable_fields(3)->set_count(5); }, kCloudBytes},

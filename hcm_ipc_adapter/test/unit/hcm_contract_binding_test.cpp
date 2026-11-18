@@ -30,7 +30,8 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
     EXPECT_NE(binding->hcmToContract, nullptr) << name;
     EXPECT_NE(binding->createDescriptor, nullptr) << name;
 
-    // Types come from the QCNode custom range and never collide.
+    // Each descriptor's own type is in the QCNode custom range; two mapped
+    // Contracts must not share one, or their frames could not be told apart.
     EXPECT_GE(binding->descriptorType, kHcmCustomDescriptorTypeBegin) << name;
     EXPECT_LT(binding->descriptorType, kHcmCustomDescriptorTypeEnd) << name;
     EXPECT_TRUE(types.insert(static_cast<int>(binding->descriptorType)).second) << name;
@@ -45,7 +46,6 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
     std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> created;
     ASSERT_EQ(CreateQrbBufferDescriptor(binding.descriptorType, created), QC::QC_STATUS_OK);
     ASSERT_NE(created, nullptr);
-    // The factory sets the registry-assigned type, overriding the header default.
     EXPECT_EQ(created->type, binding.descriptorType);
     EXPECT_TRUE(binding.acceptsDescriptor(*created));
   }

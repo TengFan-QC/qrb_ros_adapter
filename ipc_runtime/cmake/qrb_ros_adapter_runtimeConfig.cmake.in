@@ -8,6 +8,7 @@ find_package(Protobuf CONFIG QUIET)
 if(NOT Protobuf_FOUND)
   find_dependency(Protobuf)
 endif()
+find_dependency(qrb_contracts_proto CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/qrb_ros_adapter_runtimeTargets.cmake")
 

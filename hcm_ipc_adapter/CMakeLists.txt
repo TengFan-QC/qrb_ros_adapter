@@ -53,8 +53,7 @@ target_include_directories(qrb_ros_adapter_hcm_ipc_adapter PUBLIC
 target_compile_features(qrb_ros_adapter_hcm_ipc_adapter PUBLIC cxx_std_17)
 
 target_link_libraries(qrb_ros_adapter_hcm_ipc_adapter PUBLIC
-  qrb_ros_adapter::runtime
-  qrb_ros_adapter::contracts_proto
+  qrb_ros_adapter::runtime       # also brings qrb_contracts_proto::qrb_contracts_proto
   qrb_contracts::qrb_contracts   # QCNode buffer descriptors, one per Contract
   nlohmann_json::nlohmann_json
   QCNode::QCNode)

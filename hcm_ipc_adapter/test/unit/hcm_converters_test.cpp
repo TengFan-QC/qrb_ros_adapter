@@ -5,6 +5,7 @@
 
 #include <cstring>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/point_cloud_hcm_converter.hpp"
@@ -20,9 +21,10 @@ namespace
 PoseHcmContract MakePose()
 {
   PoseHcmContract pose;
-  pose.set_timestamp_ns(123456789);
-  pose.set_frame_id("map");
-  auto * value = pose.mutable_pose_with_covariance();
+  pose.mutable_header()->mutable_stamp()->set_sec(1);
+  pose.mutable_header()->mutable_stamp()->set_nanosec(23456789);
+  pose.mutable_header()->set_frame_id("map");
+  auto * value = pose.mutable_pose();
   value->mutable_pose()->mutable_position()->set_x(1.5);
   value->mutable_pose()->mutable_position()->set_y(-2.0);
   value->mutable_pose()->mutable_position()->set_z(0.25);
@@ -39,8 +41,9 @@ constexpr std::size_t kCloudBytes = 64;
 PointCloudHcmContract MakeCloud()
 {
   PointCloudHcmContract cloud;
-  cloud.set_timestamp_ns(42);
-  cloud.set_frame_id("lidar");
+  cloud.mutable_header()->mutable_stamp()->set_sec(2);
+  cloud.mutable_header()->mutable_stamp()->set_nanosec(42);
+  cloud.mutable_header()->set_frame_id("lidar");
   cloud.set_height(1);
   cloud.set_width(4);
   cloud.set_point_step(16);
@@ -83,26 +86,34 @@ TEST(HcmConverters, RoundTripEveryFieldAndRejectInvalidValuesOrPayloads)
     PoseHcmDescriptor descriptor;
     ASSERT_TRUE((ConvertContractToHcm<PoseHcmContract, PoseHcmDescriptor>(
         source, DmaBufView{}, descriptor)));
-    EXPECT_EQ(descriptor.timestampNs, 123456789u);
-    EXPECT_EQ(descriptor.frameId, "map");
+    EXPECT_EQ(descriptor.timestampNs, 1023456789u);
+    EXPECT_TRUE(descriptor.frameId == "map");
     EXPECT_DOUBLE_EQ(descriptor.poseWithCovariance.pose.position.y, -2.0);
     EXPECT_DOUBLE_EQ(descriptor.poseWithCovariance.covariance[35], 0.35);
 
     PoseHcmContract back;
-    back.set_frame_id("stale");
+    back.mutable_header()->set_frame_id("stale");
     ASSERT_TRUE((ConvertHcmToContract<PoseHcmContract, PoseHcmDescriptor>(descriptor, back)));
     EXPECT_EQ(back.SerializeAsString(), source.SerializeAsString());
 
     PoseHcmContract invalid = MakePose();
-    invalid.mutable_pose_with_covariance()->mutable_pose()->mutable_position()->set_x(
+    invalid.mutable_pose()->mutable_pose()->mutable_position()->set_x(
         std::numeric_limits<double>::quiet_NaN());
     PoseHcmDescriptor untouched;
-    untouched.frameId = "untouched";
+    ASSERT_EQ(untouched.frameId.Assign("untouched"), QC::QC_STATUS_OK);
     const ConversionResult in =
         ConvertContractToHcm<PoseHcmContract, PoseHcmDescriptor>(invalid, DmaBufView{}, untouched);
     EXPECT_FALSE(in);
     EXPECT_FALSE(in.Diagnostic().empty());
-    EXPECT_EQ(untouched.frameId, "untouched");
+    EXPECT_TRUE(untouched.frameId == "untouched");
+
+    // FrameId_t is fixed-size: a longer frame_id is rejected, never truncated.
+    PoseHcmContract longFrame = MakePose();
+    longFrame.mutable_header()->set_frame_id(
+        std::string(QRB::Memory::QRB_FRAME_ID_MAX_LEN + 1, 'f'));
+    EXPECT_FALSE((ConvertContractToHcm<PoseHcmContract, PoseHcmDescriptor>(
+        longFrame, DmaBufView{}, untouched)));
+    EXPECT_TRUE(untouched.frameId == "untouched");
 
     // A non-finite value produced on the HCM side must not be published to ROS.
     descriptor.poseWithCovariance.covariance[7] = std::numeric_limits<double>::infinity();
@@ -116,11 +127,13 @@ TEST(HcmConverters, RoundTripEveryFieldAndRejectInvalidValuesOrPayloads)
         MakeCloud(), DmaBufView{source.data(), source.size()}, target.descriptor)));
 
     EXPECT_EQ(target.descriptor.validSize, kCloudBytes);
+    EXPECT_EQ(target.descriptor.timestampNs, 2000000042u);
+    EXPECT_TRUE(target.descriptor.frameId == "lidar");
     EXPECT_EQ(target.descriptor.width, 4u);
     EXPECT_EQ(target.descriptor.rowStep, 64u);
     EXPECT_TRUE(target.descriptor.isDense);
-    ASSERT_EQ(target.descriptor.fields.size(), 3u);
-    EXPECT_EQ(target.descriptor.fields[2].name, "z");
+    ASSERT_EQ(target.descriptor.numFields, 3u);
+    EXPECT_TRUE(target.descriptor.fields[2].name == "z");
     EXPECT_EQ(target.descriptor.fields[2].offset, 8u);
     // Copy lands at the descriptor offset and stops at the layout size.
     EXPECT_EQ(target.storage[15], 0u);
@@ -143,6 +156,30 @@ TEST(HcmConverters, RoundTripEveryFieldAndRejectInvalidValuesOrPayloads)
         MakeCloud(), DmaBufView{source.data(), kCloudBytes - 1}, other.descriptor)));
     EXPECT_FALSE((ConvertContractToHcm<PointCloudHcmContract, PointCloudHcmDescriptor>(
         MakeCloud(), DmaBufView{nullptr, kCloudBytes}, other.descriptor)));
+
+    // The descriptor holds at most QRB_POINT_CLOUD_MAX_FIELDS fields and
+    // fixed-size names; a cloud beyond that is rejected before any write.
+    PointCloudHcmContract tooManyFields = MakeCloud();
+    tooManyFields.set_point_step(QRB::Memory::QRB_POINT_CLOUD_MAX_FIELDS + 1);
+    tooManyFields.set_row_step(tooManyFields.point_step() * tooManyFields.width());
+    tooManyFields.clear_fields();
+    for (std::uint32_t i = 0; i <= QRB::Memory::QRB_POINT_CLOUD_MAX_FIELDS; ++i) {
+      auto * field = tooManyFields.add_fields();
+      field->set_name("f" + std::to_string(i));
+      field->set_offset(i);
+      field->set_datatype(sensor_proto::POINT_FIELD_TYPE_UINT8);
+      field->set_count(1);
+    }
+    PointCloudHcmContract longName = MakeCloud();
+    longName.mutable_fields(0)->set_name(
+        std::string(QRB::Memory::QRB_POINT_FIELD_NAME_MAX_LEN + 1, 'n'));
+    for (const PointCloudHcmContract * rejected : {&tooManyFields, &longName}) {
+      HeapCloudDescriptor capacity(256);
+      EXPECT_FALSE((ConvertContractToHcm<PointCloudHcmContract, PointCloudHcmDescriptor>(
+          *rejected, DmaBufView{source.data(), source.size()}, capacity.descriptor)));
+      EXPECT_EQ(capacity.descriptor.validSize, 0u);
+      EXPECT_EQ(capacity.descriptor.numFields, 0u);
+    }
 
     // HCM -> ROS: validSize must cover the declared layout and fit the buffer.
     PointCloudHcmContract out;
