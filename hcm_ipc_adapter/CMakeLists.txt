@@ -12,7 +12,8 @@
 # part of the qcnode build and linked into libQCNode.so: the qcnode build adds
 # this directory (as the qrb_qcnodes nodes are added) and links the OBJECT
 # library QCNodeIpcAdapter into QCNode. SampleIpcAdapter is added to
-# QCNodeSample, so that `qcrun QCNodeSampleApp -t IpcAdapter` runs it.
+# QCNodeSample, so that `qcrun QCNodeSampleApp -t IpcAdapter` runs it, and so is
+# the HCM side of the end-to-end test (../test/hcm, `-t StreamProbe`).
 #
 # Installed CMake package: qrb_hcm_ipc_adapter, target
 # qrb_ros_adapter::hcm_ipc_adapter (the headers and libQCNode.so).
@@ -80,6 +81,12 @@ endif()
 # the qcnode build (tests/sample), so the call is deferred.
 cmake_language(EVAL CODE "cmake_language(DEFER DIRECTORY ${CMAKE_SOURCE_DIR} CALL
   target_sources QCNodeSample PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/sample/SampleIpcAdapter.cpp)")
+
+option(QRB_HCM_IPC_ADAPTER_BUILD_STREAM_PROBE
+  "Build the HCM side of the end-to-end test into QCNodeSample" ON)
+if(QRB_HCM_IPC_ADAPTER_BUILD_STREAM_PROBE)
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../test/hcm ${CMAKE_CURRENT_BINARY_DIR}/stream_probe)
+endif()
 
 # --- Install and CMake package -----------------------------------------------
 

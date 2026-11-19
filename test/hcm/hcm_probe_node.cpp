@@ -7,6 +7,8 @@
 #include "qrb_ros_adapter/ipc_runtime/contract_mappings.def"
 #undef QRB_CONTRACT_MAPPING_INCLUDE_HCM_HEADERS
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <climits>
 #include <cstring>
@@ -17,6 +19,7 @@
 
 #include "QC/Infras/Memory/BufferDescriptor.hpp"
 #include "QC/Node/Ifs/QCNodeConfigIfs.hpp"
+#include "QC/Node/NodeBase.hpp"
 
 namespace qrb::adapter::stream_probe
 {
@@ -32,8 +35,12 @@ struct HcmSenderState
 {
   std::uint32_t streamTag{0};
   std::uint64_t payloadBytes{0};
-  /** The buffer that already holds the pattern, so it is written once per buffer. */
-  const void * patterned{nullptr};
+  /**
+   * The buffers that already hold the pattern, so it is written once per
+   * buffer of a host that cycles through a few.
+   */
+  std::array<const void *, 8> patterned{};
+  std::size_t nextPatterned{0};
   std::size_t patternedBytes{0};
   /** The send time Stamp() put in the latest frame. */
   std::uint64_t lastSendNs{0};
@@ -85,7 +92,7 @@ template <typename DescriptorT>
 struct HcmProbeSample
 {
   static_assert(kAlwaysFalseHcm<DescriptorT>,
-      "add an HcmProbeSample<> for the new Contract in test/src/hcm_probe_node.cpp");
+      "add an HcmProbeSample<> for the new Contract in test/hcm/hcm_probe_node.cpp");
 };
 
 // --- geometry.v1.PoseWithCovarianceStamped (inline) ---------------------------
@@ -168,10 +175,14 @@ struct HcmProbeSample<adapter::PointCloudHcmDescriptor>
 
     if (!SyncBuffer(cloud, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE))
       return HcmStampResult::kSyncFailed;
-    if (state.patterned != data || state.patternedBytes != bytes) {
-      FillPattern(data, bytes, state.streamTag);
-      state.patterned = data;
+    if (state.patternedBytes != bytes) {
+      state.patterned = {};
       state.patternedBytes = bytes;
+    }
+    if (std::find(state.patterned.begin(), state.patterned.end(), data) == state.patterned.end()) {
+      FillPattern(data, bytes, state.streamTag);
+      state.patterned[state.nextPatterned] = data;
+      state.nextPatterned = (state.nextPatterned + 1) % state.patterned.size();
     }
     const std::uint64_t now = MonotonicNowNs();
     state.lastSendNs = now;
@@ -660,16 +671,9 @@ private:
   std::uint64_t sequence_{0};
 };
 
-}  // namespace
+// Register the probe with QCNodeFactory at static-initialization time.
+const QC::Node::NodeRegistrar<HcmStreamProbeNode> g_registerStreamProbe{kHcmStreamProbeNodeType};
 
-QC::QCStatus_e CreateHcmStreamProbeNode(QC::QCNodeType_e type,
-    std::unique_ptr<QC::QCNodeIfs> & outNode)
-{
-  outNode.reset();
-  if (type != kHcmStreamProbeNodeType)
-    return QC::QC_STATUS_UNSUPPORTED;
-  outNode = std::make_unique<HcmStreamProbeNode>();
-  return QC::QC_STATUS_OK;
-}
+}  // namespace
 
 }  // namespace qrb::adapter::stream_probe

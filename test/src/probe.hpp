@@ -18,9 +18,10 @@
 // kSampleStride bytes. An inline Contract carries the same values as exact
 // integers in an array of doubles.
 //
-// Parameters come from the built-in defaults, a JSON parameter file, then the
-// command line (HCM side) or ROS parameters (ROS side). The Flow is not a
-// parameter: both sides read it from the Adapter's static config.
+// The ROS side takes its parameters from the built-in defaults, a JSON
+// parameter file, then ROS parameters; the HCM side from its sample attributes.
+// The Flow is not a parameter: both sides read it from the Adapter's static
+// config.
 //
 
 #include <linux/dma-buf.h>
@@ -800,7 +801,7 @@ constexpr const char * kDefaultAdapterConfig = "adapter_h2r.json";
 struct ProbeParams
 {
   std::string adapterConfig;             // the Adapter's static config
-  double rate{30.0};                     // frames per second, 0: unlimited
+  double fps{30.0};                      // frames per second, 0: unlimited
   std::uint64_t payloadBytes{1u << 20};  // what a sender sends per frame
   std::uint64_t bufferBytes{32u << 20};  // the DMA buffer an HCM receiver offers
   double duration{0.0};                  // seconds, 0: until stopped
@@ -872,8 +873,8 @@ inline void ApplyJson(ProbeParams & params,
   for (const auto & [key, value] : object.items()) {
     if (key == "adapter_config")
       path(key, value, params.adapterConfig);
-    else if (key == "rate")
-      params.rate = nonNegative(key, value);
+    else if (key == "fps")
+      params.fps = nonNegative(key, value);
     else if (key == "payload_bytes")
       params.payloadBytes = unsignedValue(key, value, std::numeric_limits<std::uint32_t>::max());
     else if (key == "buffer_bytes")
@@ -925,7 +926,7 @@ inline nlohmann::json ToJson(const ProbeParams & params)
 {
   return nlohmann::json{
       {"adapter_config", params.adapterConfig},
-      {"rate", params.rate},
+      {"fps", params.fps},
       {"payload_bytes", params.payloadBytes},
       {"buffer_bytes", params.bufferBytes},
       {"duration", params.duration},
@@ -1063,7 +1064,7 @@ inline ProbeFlow ReadProbeFlow(const std::string & text,
   return flow;
 }
 
-/** @brief `flow` in one line, for the --log file of the HCM side or the ROS side. */
+/** @brief `flow` in one line, as printed by the HCM side or the ROS side. */
 inline std::string FlowText(const ProbeFlow & flow, bool hcmSide)
 {
   const bool hcmToRos = flow.direction == ProbeDirection::kHcmToRos;

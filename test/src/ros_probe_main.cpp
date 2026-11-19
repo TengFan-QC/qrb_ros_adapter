@@ -38,7 +38,7 @@ int main(int argc, char ** argv)
         "  adapter_config  the Adapter's static JSON (probe_configs/adapter_h2r.json); the\n"
         "                  probe follows its direction (0: HCM to ROS, this side receives;\n"
         "                  1: ROS to HCM, this side sends), contract_type, ros_topic, qos_profile\n"
-        "  rate            frames per second of a sender, 0: unlimited (30)\n"
+        "  fps             frames per second of a sender, 0: unlimited (30)\n"
         "  payload_bytes   payload of each frame this side sends (1048576)\n"
         "  buffer_bytes    the HCM receiver's buffer; ignored on this side\n"
         "  duration        seconds to run, 0: until a signal (0)\n"

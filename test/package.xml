@@ -4,8 +4,8 @@
   <name>qrb_ros_adapter_stream_probe</name>
   <version>0.2.0</version>
   <description>
-    End-to-end test of qrb_ros_adapter: probe nodes on the HCM and ROS sides send or receive and check frames
-    through the HCM IPC Adapter and the ROS IPC Bridge, with loss, order and latency statistics.
+    The ROS side of the end-to-end test of qrb_ros_adapter: a probe node that sends or receives and checks
+    frames through the ROS IPC Bridge and the HCM IPC Adapter, with loss, order and latency statistics.
   </description>
   <maintainer email="noreply@qualcomm.com">Qualcomm Technologies, Inc.</maintainer>
   <license>BSD-3-Clause-Clear</license>
@@ -19,8 +19,10 @@
   <depend>sensor_msgs</depend>
   <depend>qrb_ros_transport_point_cloud2_type</depend>
   <depend>qrb_ros_adapter</depend>
-  <depend>qrb_hcm_ipc_adapter</depend>
   <build_depend>nlohmann-json-dev</build_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
