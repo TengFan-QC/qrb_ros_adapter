@@ -19,7 +19,8 @@ IPC Bridge creates one ROS Flow Bridge for each Flow an Adapter registers.
 - `hcm_ipc_adapter`: the IPC Adapter Node. Needs QCNode, not ROS.
 - `ros_ipc_bridge`: the Bridge Manager and ROS Flow Bridge. Needs ROS, not
   QCNode.
-- `test`: the end-to-end test program.
+- `test`: the end-to-end stream probe. The ROS side is a ROS package; the HCM
+  side is a QCNode sample built with `hcm_ipc_adapter`.
 
 ## Table of contents
 
@@ -33,11 +34,11 @@ IPC Bridge creates one ROS Flow Bridge for each Flow an Adapter registers.
 
 ## APIs
 
-An HCM application, or a graph framework hosting QCNodes, links
-`libqrb_ros_adapter_hcm_ipc_adapter.so`, creates one node per Flow with
-`CreateHcmIpcAdapterNode()` and drives it through `Initialize()`, `Start()`,
-`ProcessFrameDescriptor()`, `Stop()` and `DeInitialize()`. The host owns the
-frame descriptors and their buffers.
+The IPC Adapter Node is built into `libQCNode.so` by the qcnode build. An HCM
+application, or a graph framework hosting QCNodes, creates one node per Flow
+with `QCNodeFactory::CreateNode(QC_NODE_TYPE_IPC_ADAPTER, ...)` and drives it
+through `Initialize()`, `Start()`, `ProcessFrameDescriptor()`, `Stop()` and
+`DeInitialize()`. The host owns the frame descriptors and their buffers.
 
 The Flow is set in the QCNode static config:
 
@@ -51,11 +52,8 @@ The Flow is set in the QCNode static config:
 Monitoring reports `sessionConnected`, `frameCount`, `errorCount`,
 `last/average/min/maxLatencyNs` and `noDataCount`.
 
-The ROS IPC Bridge takes no parameters. It runs the node
-`/qrb_ros_adapter_bridge_manager` in the component container
-`/qrb_ros_adapter_container`, and adds `/qrb_ros_adapter_flow_<name>` for each
-registered Flow. Opposite-direction Flows on the same Contract and Topic are
-rejected.
+The ROS IPC Bridge takes no parameters and adds one ROS node for each
+registered Flow.
 
 ## Supported targets
 
@@ -72,21 +70,36 @@ Installation packages and setup instructions are not ready yet.
 Start the ROS IPC Bridge:
 
 ```bash
-source /usr/ros/jazzy/setup.bash
-ros2 launch qrb_ros_adapter ros_ipc_bridge.launch.py
+bash -c 'source /usr/ros/jazzy/setup.bash && ROS_HOME=/data/ros ros2 launch qrb_ros_adapter ros_ipc_bridge.launch.py'
 ```
 
-On the HCM side, the host creates one IPC Adapter Node per Flow with
-`CreateHcmIpcAdapterNode()` and drives it like any other QCNode, following the
-lifecycle and frame processing in
-[QCNode](https://github.com/qualcomm/QcNode/blob/main/docs/QCNode.md).
-`Initialize()` takes the static config above and registers the Flow with the
-Bridge. The Contract descriptor, created with `CreateQrbBufferDescriptor()`, is
-buffer 0 of the frame passed to `ProcessFrameDescriptor()`: direction 0
-publishes it to the ROS topic, and direction 1 fills it with the newest ROS
-message, or only counts `noDataCount` if there is none.
+On the HCM side, create one IPC Adapter Node per Flow with `QCNodeFactory` and
+drive it like any other
+[QCNode](https://github.com/qualcomm/QcNode/blob/main/docs/QCNode.md). Buffer 0
+of the frame is the Contract descriptor from `CreateQrbBufferDescriptor()`:
+direction 0 publishes it, direction 1 fills it with the newest ROS message.
 
-ROS nodes publish or subscribe the topic as usual.
+`SampleIpcAdapter` is such a host:
+
+```bash
+qcrun QCNodeSampleApp -n adapter -t IpcAdapter [-k <setting> -v <value> ...]
+```
+
+### Sample settings
+
+The `IpcAdapter` and `StreamProbe` samples take `-k <setting> -v <value>`; the
+ROS probe of the [Test](#test) takes `<setting>:=<value>` on its launch.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `contract_type`, `direction`, `ros_topic` | `PointCloud2`, `0`, `/qrb_ros_adapter/sample/points` | IpcAdapter: the static config fields above. |
+| `reliability`, `durability`, `depth` | `rclcpp::QoS(10)` | IpcAdapter: the `qos_profile` fields above. |
+| `adapter_config` | StreamProbe: required; ROS probe: `adapter_h2r.json` | All: a static config file; on IpcAdapter it replaces the two rows above. |
+| `input_topic` / `output_topic` | | IpcAdapter, StreamProbe: takes frames from / gives frames to another sample. |
+| `fps` | `30` | All: frames per second a sender sends, `0` for no pause. |
+| `payload_bytes` | `1048576` | All: PointCloud2 payload a sender sends. |
+| `duration` | `0` | ROS probe: seconds to run, `0` until stopped. |
+| `log` | | ROS probe: text log file. |
 
 ## Build from source
 
@@ -94,78 +107,39 @@ Source build instructions are not ready yet.
 
 ## Test
 
-The steps below run on a Qualcomm Linux image that includes the packages and
-ros2cli.
+The stream probe runs one Flow end to end: the `StreamProbe` sample feeds or
+drains the `IpcAdapter` sample, and the ROS probe runs in the Bridge container.
+The image needs the packages and ros2cli.
 
-`qrb_ros_adapter_stream_probe` runs one Flow end to end, the two sides in
-separate processes: the HCM side hosts the Adapter and a probe QCNode on one
-frame, and the ROS side is the probe component
-`qrb::adapter::stream_probe::RosStreamProbeNode`. Each frame carries a sequence
-number and its send time, so the receiver counts lost, duplicate and reordered
-frames and measures the end-to-end latency. Both sides take the same Adapter
-config: `probe_configs/adapter_h2r.json` (default) or `adapter_r2h.json`, under
-`/usr/ros/jazzy/share/qrb_ros_adapter_stream_probe/`.
-
-1. Start the ROS IPC Bridge as in [Usage](#usage).
-
-2. In another terminal, load the ROS probe into the Bridge container:
+1. Start the Bridge with the ROS probe:
 
    ```bash
-   source /usr/ros/jazzy/setup.bash
-   ros2 component load /qrb_ros_adapter_container qrb_ros_adapter_stream_probe \
-     qrb::adapter::stream_probe::RosStreamProbeNode
+   bash -c 'source /usr/ros/jazzy/setup.bash && ROS_HOME=/data/ros ros2 launch qrb_ros_adapter_stream_probe qrb_ros_adapter_stream_probe.launch.py'
    ```
 
-3. In a third terminal, start the HCM side:
+2. In another terminal, send 1 MiB PointCloud2 frames from HCM to ROS at 30 FPS
+   for 10 seconds:
 
    ```bash
-   source /usr/ros/jazzy/setup.bash
-   qrb_ros_adapter_stream_probe
+   CFG=/usr/ros/jazzy/share/qrb_ros_adapter_stream_probe/probe_configs
+   qcrun QCNodeSampleApp -T 10 \
+     -n adapter -t IpcAdapter -k adapter_config -v $CFG/adapter_h2r.json -k input_topic -v /frames \
+     -n probe -t StreamProbe -k adapter_config -v $CFG/adapter_h2r.json -k output_topic -v /frames
    ```
 
-   It initializes and starts both nodes and sends 1 MiB PointCloud2 frames from
-   HCM to ROS at 30 FPS. Type `help` for the lifecycle commands, and `quit` to
-   stop and print the summary. The ROS probe prints its summary in the Bridge
-   terminal when the Bridge stops.
-
-Both sides take the same parameters, such as the Adapter config
-(`adapter_r2h.json` for ROS to HCM), the rate, the payload size and the
-duration; `--help` lists them:
+For ROS to HCM, use `adapter_r2h.json` on both sides and list the probe first:
 
 ```bash
-qrb_ros_adapter_stream_probe --help
-ros2 run qrb_ros_adapter_stream_probe ros_stream_probe_node --help
+# Terminal 1
+bash -c 'source /usr/ros/jazzy/setup.bash && ROS_HOME=/data/ros ros2 launch qrb_ros_adapter_stream_probe qrb_ros_adapter_stream_probe.launch.py adapter_config:=/usr/ros/jazzy/share/qrb_ros_adapter_stream_probe/probe_configs/adapter_r2h.json'
+# Terminal 2, with CFG set as above
+qcrun QCNodeSampleApp -T 10 \
+  -n probe -t StreamProbe -k adapter_config -v $CFG/adapter_r2h.json -k input_topic -v /frames \
+  -n adapter -t IpcAdapter -k adapter_config -v $CFG/adapter_r2h.json -k output_topic -v /frames
 ```
 
-A run, trimmed (HCM side, then the Bridge terminal):
-
-```text
-$ qrb_ros_adapter_stream_probe
-qrb_ros_adapter_stream_probe: the HCM side of a probed stream through the HCM IPC Adapter
-  flow            direction 0 (HCM to ROS, this side sends), PointCloud2 on /qrb_ros_adapter/stream_probe/points
-                  QoS best_effort, volatile, depth 5; descriptor at buffer 0
-  run             rate 30 fps, payload 1048576 bytes, duration 0 s (until quit or a signal), warmup 0 s, log none
-...
-adapter Initialize OK INITIAL->READY
-adapter Start OK READY->RUNNING
-> quit
-adapter Stop OK RUNNING->READY
-adapter DeInitialize OK READY->INITIAL
-summary: end: quit, 6.0 s since the first frame, exit code 0
-summary: stream: sent 180
-summary: adapter: sessionConnected=0 | frameCount=180 | errorCount=0 | lastLatencyNs=1531302 | averageLatencyNs=2288826 | minLatencyNs=1052588 | maxLatencyNs=4258687 | noDataCount=0
-```
-
-```text
-[INFO] [qrb_ros_adapter_bridge_manager]: registered flow 'stream_probe_adapter' at '/run/qrb_ros_adapter/flows/stream_probe_adapter-1.sock'
-[INFO] [qrb_ros_adapter_stream_probe]: first frame: seq 0, check ok
-[INFO] [qrb_ros_adapter_flow_stream_probe_adapter]: flow 'stream_probe_adapter': closed, frames in 180, out 180, no-data 0, conversion errors 0
-[INFO] [qrb_ros_adapter_bridge_manager]: unregistered flow 'stream_probe_adapter'
-[INFO] [qrb_ros_adapter_stream_probe]: summary: stream: received 180  lost 0
-[INFO] [qrb_ros_adapter_stream_probe]: summary: e2e latency of 180 frames: avg 2.538 min 1.201 p50 2.556 p95 3.244 p99 3.506 max 3.547 ms
-```
-
-Each package also has unit tests, run with `ctest` in its build directory.
+The run passes when the HCM side prints `probe PASS`. The probe settings are
+in [Sample settings](#sample-settings).
 
 ## License
 

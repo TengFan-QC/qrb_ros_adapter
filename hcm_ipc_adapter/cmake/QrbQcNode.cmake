@@ -3,8 +3,8 @@
 # The QCNode headers and library are looked up in the system prefixes, which in
 # a Yocto build is the recipe sysroot populated by the qcnode recipe.
 #
-# Installed with qrb_hcm_ipc_adapter, whose package config includes it to
-# recreate the QCNode target its exported library links.
+# Installed with qrb_hcm_ipc_adapter, whose package config includes it: the IPC
+# Adapter Node is built into libQCNode.so.
 
 if(NOT TARGET QCNode::QCNode)
   find_path(QRB_QCNODE_INCLUDE_DIR QC/Node/Ifs/QCNodeIfs.hpp)

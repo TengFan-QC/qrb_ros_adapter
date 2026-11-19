@@ -7,9 +7,10 @@
 //
 // HcmStreamProbeNode, the HCM side probe: a standard QCNode that produces
 // (HCM to ROS) or consumes and checks (ROS to HCM) the Contract descriptor of
-// a frame it shares with the HCM IPC Adapter. Hosts create it with
-// CreateHcmStreamProbeNode() and drive it through QCNodeIfs only; this header
-// gives them the layout of its monitoring data.
+// a frame it passes to the HCM IPC Adapter. It is built into libQCNodeSample.so
+// by the qcnode build and registered with QCNodeFactory as
+// kHcmStreamProbeNodeType; SampleStreamProbe hosts it. This header gives hosts
+// the layout of its monitoring data.
 //
 // Static configuration, the QCNode `"static"` block:
 //
@@ -30,7 +31,6 @@
 //
 
 #include <cstdint>
-#include <memory>
 #include <type_traits>
 
 #include "QC/Node/Ifs/QCNodeIfs.hpp"
@@ -40,8 +40,11 @@
 namespace qrb::adapter::stream_probe
 {
 
-/** @brief The node type CreateHcmStreamProbeNode() accepts; the Adapter is CUSTOM_0. */
-constexpr QC::QCNodeType_e kHcmStreamProbeNodeType = QC::QC_NODE_TYPE_CUSTOM_1;
+/**
+ * @brief The probe's type in QCNodeFactory. In libQCNode.so the Demo node is
+ * CUSTOM_0 and the IPC Adapter Node is CUSTOM_1.
+ */
+constexpr QC::QCNodeType_e kHcmStreamProbeNodeType = QC::QC_NODE_TYPE_CUSTOM_2;
 
 /** @brief What GetMonitoringIfs().Place() copies out. Reset by Initialize(). */
 struct HcmStreamProbeMonitoringData : public QC::QCNodeMonitoringBase_t
@@ -61,10 +64,6 @@ struct HcmStreamProbeMonitoringData : public QC::QCNodeMonitoringBase_t
 };
 static_assert(std::is_trivially_copyable_v<HcmStreamProbeMonitoringData>,
     "Place() copies the monitoring data with memcpy");
-
-/** @brief NodeFactoryFn-compatible factory, for kHcmStreamProbeNodeType only. */
-QC::QCStatus_e CreateHcmStreamProbeNode(QC::QCNodeType_e type,
-    std::unique_ptr<QC::QCNodeIfs> & outNode);
 
 }  // namespace qrb::adapter::stream_probe
 

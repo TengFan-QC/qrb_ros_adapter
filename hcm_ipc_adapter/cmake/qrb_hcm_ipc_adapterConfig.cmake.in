@@ -6,9 +6,17 @@ find_dependency(qrb_ros_adapter_runtime @PROJECT_VERSION@)
 find_dependency(nlohmann_json)
 find_dependency(qrb_contracts)
 
-# Recreate QCNode::QCNode, which the exported library links.
+# The IPC Adapter Node is in libQCNode.so.
 include("${CMAKE_CURRENT_LIST_DIR}/QrbQcNode.cmake")
 
-include("${CMAKE_CURRENT_LIST_DIR}/qrb_hcm_ipc_adapterTargets.cmake")
+if(NOT TARGET qrb_ros_adapter::hcm_ipc_adapter)
+  add_library(qrb_ros_adapter::hcm_ipc_adapter INTERFACE IMPORTED)
+  set_target_properties(qrb_ros_adapter::hcm_ipc_adapter PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include"
+    INTERFACE_COMPILE_DEFINITIONS "QC_TARGET_SOC=${QRB_QCNODE_TARGET_SOC}"
+    INTERFACE_COMPILE_FEATURES cxx_std_17
+    INTERFACE_LINK_LIBRARIES
+      "QCNode::QCNode;qrb_ros_adapter::runtime;qrb_contracts::qrb_contracts;nlohmann_json::nlohmann_json")
+endif()
 
 check_required_components(qrb_hcm_ipc_adapter)

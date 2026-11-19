@@ -7,6 +7,8 @@
 #include <cstring>
 #include <utility>
 
+#include "QC/Node/NodeBase.hpp"
+
 namespace qrb::adapter
 {
 
@@ -52,7 +54,7 @@ QC::QCStatus_e HcmIpcAdapterNodeConfig::VerifyAndSet(const std::string config, s
   config_.adapter = std::move(parsed);
   config_.nodeId.name = config_.adapter.nodeName;
   config_.nodeId.id = static_cast<std::uint8_t>(config_.adapter.nodeId);
-  config_.nodeId.type = QC::QC_NODE_TYPE_CUSTOM_0;
+  config_.nodeId.type = QC_NODE_TYPE_IPC_ADAPTER;
   config_.numOfEntries = 1;
   return QC::QC_STATUS_OK;
 }
@@ -322,14 +324,13 @@ QC::QCNodeMonitoringIfs & HcmIpcAdapterNode::GetMonitoringIfs()
   return monitoring_;
 }
 
-QC::QCStatus_e CreateHcmIpcAdapterNode(QC::QCNodeType_e type,
-    std::unique_ptr<QC::QCNodeIfs> & outNode)
-{
-  outNode.reset();
-  if (type != QC::QC_NODE_TYPE_CUSTOM_0)
-    return QC::QC_STATUS_UNSUPPORTED;
-  outNode = std::make_unique<HcmIpcAdapterNode>();
-  return outNode != nullptr ? QC::QC_STATUS_OK : QC::QC_STATUS_NO_RESOURCE;
-}
-
 }  // namespace qrb::adapter
+
+namespace
+{
+
+// Register the IPC Adapter Node with QCNodeFactory at static-initialization time.
+const QC::Node::NodeRegistrar<qrb::adapter::HcmIpcAdapterNode> g_registerIpcAdapter{
+    QC_NODE_TYPE_IPC_ADAPTER};
+
+}  // namespace

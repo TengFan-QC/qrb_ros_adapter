@@ -378,7 +378,7 @@ struct ParamHelp
 constexpr ParamHelp kParamHelp[] = {
     {"params_file", "JSON file of the parameters below"},
     {"adapter_config", "the Adapter's static JSON; the Flow comes from it only"},
-    {"rate", "frames per second of a sender, 0: unlimited"},
+    {"fps", "frames per second of a sender, 0: unlimited"},
     {"payload_bytes", "payload of each frame this side sends"},
     {"buffer_bytes", "the HCM receiver's buffer; ignored on this side"},
     {"duration", "seconds to run, 0: until unloaded or a signal"},
@@ -429,8 +429,8 @@ public:
         "# HCM side's log too), line type, details. Latencies in ms; e2e: probe send to receive.\n"
         "# A frame line per frame. A monitor line every 5 s: rates over those 5 s, totals since "
         "the start.\n" +
-        FormatText("# run: rate %g fps, payload %llu bytes, duration %g s, warmup %g s",
-            params.rate, U64(params.payloadBytes), params.duration, params.warmup));
+        FormatText("# run: fps %g, payload %llu bytes, duration %g s, warmup %g s", params.fps,
+            U64(params.payloadBytes), params.duration, params.warmup));
     WriteLocked(LogPrefix(MonotonicNowNs(), "flow") + FlowText(flow, false));
   }
 
@@ -780,14 +780,13 @@ RosStreamProbeNode::RosStreamProbeNode(const rclcpp::NodeOptions & options)
       "  adapter config  %s\n"
       "  flow            direction %d (%s, this side %s), %s on %s (stream tag 0x%08x)\n"
       "                  QoS %s, %s, depth %u\n"
-      "  run             rate %g fps%s, payload %llu bytes, duration %g s%s, warmup %g s, log %s",
+      "  run             fps %g%s, payload %llu bytes, duration %g s%s, warmup %g s, log %s",
       get_parameter("params_file").as_string().c_str(), params_.adapterConfig.c_str(),
       static_cast<int>(flow_.direction),
       flow_.direction == ProbeDirection::kHcmToRos ? "HCM to ROS" : "ROS to HCM",
       sender_ ? "sends" : "receives", ShortContractName(flow_.contract).c_str(),
       flow_.topic.c_str(), StreamTagOf(flow_.topic), flow_.reliability.c_str(),
-      flow_.durability.c_str(), flow_.depth, params_.rate,
-      params_.rate == 0.0 ? " (unlimited)" : "",
+      flow_.durability.c_str(), flow_.depth, params_.fps, params_.fps == 0.0 ? " (unlimited)" : "",
       static_cast<unsigned long long>(params_.payloadBytes), params_.duration,
       params_.duration == 0.0 ? " (until unloaded or a signal)" : "", params_.warmup,
       params_.log.empty() ? "none" : params_.log.c_str());
@@ -934,9 +933,9 @@ void RosStreamProbeNode::SendLoop()
   recorder_->Begin(FormatText("matched: %zu peer(s)", endpoint_->PeerCount()));
 
   using Clock = std::chrono::steady_clock;
-  const Clock::duration period = params_.rate > 0.0 ?
+  const Clock::duration period = params_.fps > 0.0 ?
                                      std::chrono::duration_cast<Clock::duration>(
-                                         std::chrono::duration<double>(1.0 / params_.rate)) :
+                                         std::chrono::duration<double>(1.0 / params_.fps)) :
                                      Clock::duration::zero();
   const std::uint64_t payloadBytes = endpoint_->PayloadBytes();
   Clock::time_point next = Clock::now();
