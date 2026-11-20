@@ -45,6 +45,21 @@ Status ValidateParentDirectory(const std::string & path)
   return Status::kOk;
 }
 
+// A SOCK_SEQPACKET frame that does not fit in the send buffer fails sendmsg() with EMSGSIZE,
+// and the default buffer comes from net.core.wmem_default. Raise a smaller buffer so that the
+// largest frame fits; the kernel caps the request at net.core.wmem_max. Best effort: on
+// failure the buffer stays as it is.
+void SizeSendBuffer(int fd)
+{
+  // sendmsg() needs 32 bytes more than the frame; SCM_RIGHTS fds are not counted.
+  constexpr int kWanted = static_cast<int>(kTransportHeaderEncodedSize + kMaxPayloadSize + 32);
+  int current = 0;
+  socklen_t length = sizeof(current);
+  if (::getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &current, &length) == 0 && current >= kWanted)
+    return;
+  (void)::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &kWanted, sizeof(kWanted));
+}
+
 Status RemoveStaleSocket(const std::string & path)
 {
   struct stat info{};
@@ -187,6 +202,7 @@ Status IpcEndpoint::WaitAndAccept(std::chrono::milliseconds timeout,
   connOut = ::accept4(listenFd_, nullptr, nullptr, SOCK_CLOEXEC);
   if (connOut < 0)
     return Status::kResourceError;
+  SizeSendBuffer(connOut);
   return Status::kOk;
 }
 
@@ -222,6 +238,7 @@ Status IpcEndpoint::ConnectOnce(const std::string & socketPath)
   int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
   if (fd < 0)
     return Status::kResourceError;
+  SizeSendBuffer(fd);
 
   if (::connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0) {
     fd_ = fd;

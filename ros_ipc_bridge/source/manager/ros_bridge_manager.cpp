@@ -80,6 +80,12 @@ void RosBridgeManager::Start()
   }
   bootstrapThread_ = std::thread(&RosBridgeManager::BootstrapLoop, this);
   RCLCPP_INFO(get_logger(), "listening for Adapters on '%s'", bootstrapSocketPath_.c_str());
+  for (std::size_t i = 0; i < RosContractBindingCount(); ++i) {
+    const ContractDescriptor & contract = *RosContractBindingAt(i)->descriptor;
+    RCLCPP_INFO(get_logger(), "supported contract: %.*s (%s)",
+        static_cast<int>(contract.typeName.size()), contract.typeName.data(),
+        ToString(contract.payloadClass));
+  }
 }
 
 void RosBridgeManager::Stop()

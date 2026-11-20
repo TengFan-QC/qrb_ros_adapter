@@ -23,7 +23,7 @@ struct DmaBufView
 
 /** @brief Copy a Contract string into a fixed-size descriptor string; fails if it does not fit. */
 template <std::size_t N>
-bool AssignHcmString(const std::string & source, QC::QCString<N> & target)
+[[nodiscard]] bool AssignHcmString(const std::string & source, QC::QCString<N> & target)
 {
   return source.size() <= N && target.Assign(source.data(),
                                    static_cast<std::uint32_t>(source.size())) == QC::QC_STATUS_OK;

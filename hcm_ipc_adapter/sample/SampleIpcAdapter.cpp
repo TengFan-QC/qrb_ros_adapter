@@ -10,9 +10,11 @@
  * descriptor. The ROS Bridge (ros_ipc_bridge) must be running.
  *
  * HCM to ROS (direction 0): with input_topic, it sends every frame another sample publishes
- * there; without, it sends a fixed XYZ point cloud or a pose moving along x every 1/fps second.
- * ROS to HCM (direction 1): it fetches the latest ROS message into a frame; with output_topic,
- * it publishes every frame fetched there, and without, it fetches every 1/fps second.
+ * there, for any Contract the Adapter maps; without, it sends a frame every 1/fps second, a
+ * fixed XYZ point cloud or a pose moving along x, and rejects any other Contract in Init().
+ * ROS to HCM (direction 1), for any mapped Contract: it fetches the latest ROS message into a
+ * frame; with output_topic, it publishes every frame fetched there, and without, it fetches
+ * every 1/fps second.
  *
  * It prints the node state after each lifecycle call, the configuration read back through
  * GetConfigurationIfs() after Initialize(), and the monitoring and frame counts after Stop().
@@ -20,10 +22,10 @@
  * Attributes:
  *   adapter_config: (optional) a file with the Adapter's static config; it replaces the six
  *                   Flow attributes below
- *   contract_type : (optional) qrb.contract.sensor.v1.PointCloud2 (default) or
- *                   qrb.contract.geometry.v1.PoseWithCovarianceStamped
+ *   contract_type : (optional) a mapped Contract, default qrb.contract.sensor.v1.PointCloud2
  *   direction     : (optional) 0: HCM to ROS (default), 1: ROS to HCM
- *   ros_topic     : (optional) default /qrb_ros_adapter/sample/points or .../pose
+ *   ros_topic     : (optional) default /qrb_ros_adapter/sample/points for PointCloud2,
+ *                   .../pose for PoseWithCovarianceStamped, else .../<contract in snake_case>
  *   reliability   : (optional) reliable or best_effort, default the ROS default
  *   durability    : (optional) volatile or transient_local, default the ROS default
  *   depth         : (optional) 1..32, default the ROS default
@@ -31,8 +33,9 @@
  *   output_topic  : (optional) direction 1: the topic to publish the fetched frames on
  *   pool_size     : (optional) frames to fetch into with output_topic, 1..32, default 4
  *   fps           : (optional) frames per second, 0 for no pause, default 30
- *   payload_bytes : (optional) point cloud payload sent to ROS, default 1048576
- *   buffer_bytes  : (optional) point cloud buffer received from ROS, default 33554432
+ *   payload_bytes : (optional) bytes of points sent to ROS, for PointCloud2, default 1048576
+ *   buffer_bytes  : (optional) buffer received from ROS into, for a DMA-BUF Contract,
+ *                   default 33554432
  */
 
 #include "ContractFrame.hpp"
@@ -95,9 +98,10 @@ public:
 
 private:
     QCStatus_e LoadAdapterConfig( const std::string &path, std::string &config );
+    std::string DefaultTopic() const;
     std::string MakeAdapterConfig( SampleConfig_t &config );
     QCStatus_e SetupFrames();
-    void FillCloud( ContractFrame &frame );
+    void FillFrame( ContractFrame &frame );
     void UpdateFrame( ContractFrame &frame );
     QCStatus_e Process( ContractFrame &frame );
     bool GetMonitor( qrb::adapter::HcmIpcAdapterMonitoringData &monitor );
@@ -178,10 +182,41 @@ QCStatus_e SampleIpcAdapter::LoadAdapterConfig( const std::string &path, std::st
     return QC_STATUS_OK;
 }
 
+std::string SampleIpcAdapter::DefaultTopic() const
+{
+    std::string topic = "/qrb_ros_adapter/sample/";
+    if ( kPointCloudContract == m_contract )
+    {
+        return topic + "points";
+    }
+    if ( kPoseContract == m_contract )
+    {
+        return topic + "pose";
+    }
+
+    // The message name of the Contract in snake_case, e.g. ObjectDetection: object_detection.
+    std::string message = m_contract.substr( m_contract.rfind( '.' ) + 1 );
+    bool first = true;
+    for ( char c : message )
+    {
+        if ( ( c >= 'A' ) && ( c <= 'Z' ) )
+        {
+            if ( !first )
+            {
+                topic += '_';
+            }
+            c = (char) ( c - 'A' + 'a' );
+        }
+        topic += c;
+        first = false;
+    }
+
+    return topic;
+}
+
 std::string SampleIpcAdapter::MakeAdapterConfig( SampleConfig_t &config )
 {
-    std::string defaultTopic =
-            m_isPointCloud ? "/qrb_ros_adapter/sample/points" : "/qrb_ros_adapter/sample/pose";
+    std::string defaultTopic = DefaultTopic();
     DataTree dt;
     dt.Set<std::string>( "static.name", m_name );
     dt.Set<uint32_t>( "static.id", m_nodeId.id );
@@ -235,9 +270,9 @@ QCStatus_e SampleIpcAdapter::Init( std::string name, SampleConfig_t &config )
     if ( QC_STATUS_OK == ret )
     {
         m_isPointCloud = ( kPointCloudContract == m_contract );
-        if ( ( false == m_isPointCloud ) && ( kPoseContract != m_contract ) )
+        if ( nullptr == qrb::adapter::FindHcmContractBinding( m_contract ) )
         {
-            QC_ERROR( "unsupported contract_type: %s", m_contract.c_str() );
+            QC_ERROR( "contract_type is not mapped by the Adapter: %s", m_contract.c_str() );
             ret = QC_STATUS_BAD_ARGUMENTS;
         }
         m_inputTopic = Get( config, "input_topic", "" );
@@ -314,8 +349,26 @@ QCStatus_e SampleIpcAdapter::SetupFrames()
         // The publisher of input_topic owns the frames.
         return ret;
     }
+    if ( m_isHcmToRos && !m_isPointCloud && ( kPoseContract != m_contract ) )
+    {
+        // FillFrame() knows no other descriptor, and an unfilled one is rejected every frame.
+        QC_ERROR( "without input_topic, the sample sends only %s and %s; send %s frames on "
+                  "input_topic, for example from the StreamProbe sample",
+                  kPointCloudContract, kPoseContract, m_contract.c_str() );
+        return QC_STATUS_BAD_ARGUMENTS;
+    }
 
     uint32_t bytes = m_isHcmToRos ? m_payloadBytes : m_bufferBytes;
+    const qrb::adapter::HcmContractBinding *binding =
+            qrb::adapter::FindHcmContractBinding( m_contract );
+    if ( ( nullptr != binding ) &&
+         ( qrb::adapter::PayloadClass::kDmaBuf == binding->descriptor->payloadClass ) &&
+         ( 0 == bytes ) )
+    {
+        QC_ERROR( "%s must not be 0 for %s", m_isHcmToRos ? "payload_bytes" : "buffer_bytes",
+                  m_contract.c_str() );
+        return QC_STATUS_BAD_ARGUMENTS;
+    }
     if ( m_isPointCloud && m_isHcmToRos && ( bytes < kPointStep ) )
     {
         QC_ERROR( "payload_bytes must hold at least one point: %u", bytes );
@@ -331,7 +384,7 @@ QCStatus_e SampleIpcAdapter::SetupFrames()
         ret = m_frame.Init( m_contract, bytes );
         if ( ( QC_STATUS_OK == ret ) && m_isHcmToRos )
         {
-            FillCloud( m_frame );
+            FillFrame( m_frame );
         }
     }
     if ( QC_STATUS_OK != ret )
@@ -342,7 +395,7 @@ QCStatus_e SampleIpcAdapter::SetupFrames()
     return ret;
 }
 
-void SampleIpcAdapter::FillCloud( ContractFrame &frame )
+void SampleIpcAdapter::FillFrame( ContractFrame &frame )
 {
     auto *pose = dynamic_cast<QRB::Memory::PoseDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr != pose )
