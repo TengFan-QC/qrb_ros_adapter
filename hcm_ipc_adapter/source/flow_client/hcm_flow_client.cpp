@@ -5,17 +5,15 @@
 
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/message.h>
-#include <linux/dma-buf.h>
-#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <cerrno>
-#include <climits>
+#include <cstdint>
 
 #include "QC/Infras/Memory/BufferDescriptor.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_converters.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_dma_buffer.hpp"
 #include "qrb_ros_adapter/ipc_runtime/contract_descriptor_registry.hpp"
 #include "qrb_ros_adapter/ipc_runtime/control_status.hpp"
 #include "qrb_ros_adapter/ipc_runtime/transport_codec.hpp"
@@ -51,77 +49,10 @@ Status QueryDmaBufSize(int fd, std::uint64_t & outSize)
   return Status::kOk;
 }
 
-Status BeginCpuRead(int fd)
+/** A DmaBuf Contract needs a DMA-BUF of this process, since its fd crosses the Session. */
+bool LocalDmaBuffer(const QC::Memory::QCBufferDescriptorBase_t & descriptor, int & fd)
 {
-  if (fd < 0)
-    return Status::kOk;
-  dma_buf_sync sync{DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ};
-  if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
-    return Status::kOk;
-  }
-  return Status::kResourceError;
-}
-
-Status EndCpuRead(int fd)
-{
-  if (fd < 0)
-    return Status::kOk;
-  dma_buf_sync sync{DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ};
-  if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
-    return Status::kOk;
-  }
-  return Status::kResourceError;
-}
-
-Status BeginCpuWrite(int fd)
-{
-  if (fd < 0)
-    return Status::kOk;
-  dma_buf_sync sync{DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE};
-  if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
-    return Status::kOk;
-  }
-  return Status::kResourceError;
-}
-
-Status EndCpuWrite(int fd)
-{
-  if (fd < 0)
-    return Status::kOk;
-  dma_buf_sync sync{DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE};
-  if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 || errno == ENOTTY) {
-    return Status::kOk;
-  }
-  return Status::kResourceError;
-}
-
-bool LocalDmaBuffer(QC::Memory::QCBufferDescriptorBase_t & base,
-    QC::Memory::BufferDescriptor_t *& descriptor,
-    int & fd)
-{
-  descriptor = dynamic_cast<QC::Memory::BufferDescriptor_t *>(&base);
-  if (descriptor == nullptr || descriptor->allocatorType != QC::Memory::QC_MEMORY_ALLOCATOR_DMA ||
-      descriptor->pBuf == nullptr || descriptor->offset > descriptor->size ||
-      descriptor->dmaHandle > static_cast<std::uint64_t>(INT_MAX) ||
-      (descriptor->pid != 0 && descriptor->pid != ::getpid())) {
-    return false;
-  }
-  fd = static_cast<int>(descriptor->dmaHandle);
-  return fd >= 0;
-}
-
-bool LocalDmaBuffer(const QC::Memory::QCBufferDescriptorBase_t & base,
-    const QC::Memory::BufferDescriptor_t *& descriptor,
-    int & fd)
-{
-  auto * mutableDescriptor = static_cast<QC::Memory::BufferDescriptor_t *>(nullptr);
-  if (!LocalDmaBuffer(
-          const_cast<QC::Memory::QCBufferDescriptorBase_t &>(base), mutableDescriptor, fd)) {
-    descriptor = nullptr;
-    return false;
-  }
-  descriptor = mutableDescriptor;
-  return true;
+  return InspectHcmBuffer(descriptor, fd) == HcmBufferAccess::kLocalDmaBuf;
 }
 
 }  // namespace
@@ -431,7 +362,7 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
       return Fail(Status::kResourceError, "failed to map received DMA-BUF");
     }
     mappedSize = static_cast<std::size_t>(bufferSize);
-    Status syncStarted = BeginCpuRead(fds[0].Get());
+    Status syncStarted = BeginDmaBufCpuRead(fds[0].Get());
     if (syncStarted != Status::kOk) {
       ::munmap(mappedAddress, mappedSize);
       return Fail(syncStarted, "failed to begin DMA-BUF CPU read");
@@ -446,31 +377,31 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
     return Fail(Status::kProtocolError, "inline contract must not carry a DMA-BUF offset");
   }
 
+  // targetFd stays -1 for an Inline Contract, so the target sync below is a no-op.
   int targetFd = -1;
-  QC::Memory::BufferDescriptor_t * targetBuffer = nullptr;
-  if (isDmaBuf && !LocalDmaBuffer(target, targetBuffer, targetFd)) {
+  if (isDmaBuf && !LocalDmaBuffer(target, targetFd)) {
     if (cpuReadStarted)
-      EndCpuRead(fds[0].Get());
+      EndDmaBufCpuRead(fds[0].Get());
     ::munmap(mappedAddress, mappedSize);
     fds[0].Reset();
     return RejectFetched(requestId, Status::kInvalidArgument,
         "HCM descriptor does not provide a writable local DMA-BUF");
   }
-  Status targetSync = isDmaBuf ? BeginCpuWrite(targetFd) : Status::kOk;
+  Status targetSync = BeginDmaBufCpuWrite(targetFd);
   if (targetSync != Status::kOk) {
     if (cpuReadStarted)
-      EndCpuRead(fds[0].Get());
+      EndDmaBufCpuRead(fds[0].Get());
     if (mappedAddress != MAP_FAILED)
       ::munmap(mappedAddress, mappedSize);
     return Fail(targetSync, "failed to begin HCM descriptor DMA-BUF CPU write");
   }
 
   ConversionResult converted = binding_->contractToHcm(*contractMessage_, view, target);
-  Status targetCleanup = isDmaBuf ? EndCpuWrite(targetFd) : Status::kOk;
+  Status targetCleanup = EndDmaBufCpuWrite(targetFd);
   Status copyCleanup = Status::kOk;
   if (isDmaBuf) {
     if (cpuReadStarted)
-      copyCleanup = EndCpuRead(fds[0].Get());
+      copyCleanup = EndDmaBufCpuRead(fds[0].Get());
     if (::munmap(mappedAddress, mappedSize) != 0)
       copyCleanup = Status::kResourceError;
     fds[0].Reset();
@@ -519,28 +450,35 @@ Status HcmFlowClient::Publish(const QC::Memory::QCBufferDescriptorBase_t & sourc
   }
 
   const bool isDmaBuf = context_.Descriptor()->payloadClass == PayloadClass::kDmaBuf;
+  // sourceFd stays -1 for an Inline Contract, so the source sync below is a no-op.
   int sourceFd = -1;
-  const QC::Memory::BufferDescriptor_t * sourceBuffer = nullptr;
   // Frame errors before PUBLISH_REQUEST is sent drop only this frame.
-  if (isDmaBuf && !LocalDmaBuffer(source, sourceBuffer, sourceFd)) {
+  if (isDmaBuf && !LocalDmaBuffer(source, sourceFd)) {
     return Status::kInvalidArgument;  // no readable local DMA-BUF
   }
-  if (isDmaBuf && (sourceBuffer->offset > sourceBuffer->size || sourceBuffer->validSize == 0 ||
+  // A local DMA-BUF is a BufferDescriptor_t with offset <= size.
+  const auto * sourceBuffer = dynamic_cast<const QC::Memory::BufferDescriptor_t *>(&source);
+  if (isDmaBuf && (sourceBuffer == nullptr || sourceBuffer->validSize == 0 ||
                       sourceBuffer->validSize > sourceBuffer->size - sourceBuffer->offset)) {
     return Status::kInvalidArgument;  // invalid payload size
   }
 
-  Status sourceSync = isDmaBuf ? BeginCpuRead(sourceFd) : Status::kOk;
+  Status sourceSync = BeginDmaBufCpuRead(sourceFd);
   if (sourceSync != Status::kOk) {
     return Fail(sourceSync, "failed to begin HCM descriptor DMA-BUF CPU read");
   }
 
   ConversionResult converted = binding_->hcmToContract(source, *contractMessage_);
-  Status sourceCleanup = isDmaBuf ? EndCpuRead(sourceFd) : Status::kOk;
+  Status sourceCleanup = EndDmaBufCpuRead(sourceFd);
   if (sourceCleanup != Status::kOk) {
     return Fail(sourceCleanup, "failed to finish HCM descriptor DMA-BUF CPU read");
   }
   if (!converted) {
+    ++context_.conversionErrors;
+    return Status::kConversionError;
+  }
+  if (contractMessage_->ByteSizeLong() > kMaxPayloadSize) {
+    // Too large for one IPC frame: drop this frame like a failed conversion.
     ++context_.conversionErrors;
     return Status::kConversionError;
   }

@@ -57,16 +57,24 @@ public:
      */
     QCStatus_e Init( const std::string &contractType, uint32_t bufferBytes )
     {
+        const auto *binding = qrb::adapter::FindHcmContractBinding( contractType );
+        if ( nullptr == binding )
+        {
+            return QC_STATUS_UNSUPPORTED;
+        }
         std::unique_ptr<Memory::QCBufferDescriptorBase_t> created;
-        QCStatus_e ret = qrb::adapter::CreateQrbBufferDescriptor(
-                qrb::adapter::GetQrbBufferDescriptorType( contractType ), created );
+        QCStatus_e ret =
+                qrb::adapter::CreateQrbBufferDescriptor( binding->descriptorType, created );
         if ( ( QC_STATUS_OK != ret ) || ( nullptr == created ) )
         {
             return ( QC_STATUS_OK != ret ) ? ret : QC_STATUS_UNSUPPORTED;
         }
 
+        // Every qrb_contracts descriptor inherits BufferDescriptor_t, but only a DMA-BUF Contract
+        // keeps its data in that buffer; an inline one (Pose) carries everything in its own fields.
         auto *buffer = dynamic_cast<Memory::BufferDescriptor_t *>( created.get() );
-        if ( nullptr != buffer )
+        if ( ( qrb::adapter::PayloadClass::kDmaBuf == binding->descriptor->payloadClass ) &&
+             ( nullptr != buffer ) )
         {
             if ( 0 == bufferBytes )
             {
@@ -98,7 +106,6 @@ public:
     }
 
     Memory::QCBufferDescriptorBase_t &Descriptor() { return *m_descriptor; }
-    bool IsDmaBuf() const { return m_fd >= 0; }
 
 private:
     static int AllocateDmaBuf( uint32_t bytes )

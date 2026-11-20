@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <climits>
 #include <cstring>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -20,6 +19,7 @@
 #include "QC/Infras/Memory/BufferDescriptor.hpp"
 #include "QC/Node/Ifs/QCNodeConfigIfs.hpp"
 #include "QC/Node/NodeBase.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_dma_buffer.hpp"
 
 namespace qrb::adapter::stream_probe
 {
@@ -54,20 +54,13 @@ enum class HcmStampResult
   kSyncFailed,
 };
 
-/** @brief CPU access to the buffer of `descriptor`; a buffer without a DMA-BUF needs none. */
-inline bool SyncBuffer(const QC::Memory::BufferDescriptor_t & descriptor, std::uint64_t flags)
+/**
+ * @brief The fd to sync around CPU access to the buffer of `descriptor`; like
+ * the Adapter, false unless the buffer is a DMA-BUF of this process.
+ */
+inline bool LocalBufferFd(const QC::Memory::BufferDescriptor_t & descriptor, int & fd)
 {
-  if (descriptor.allocatorType != QC::Memory::QC_MEMORY_ALLOCATOR_DMA)
-    return true;
-  if (descriptor.dmaHandle > static_cast<std::uint64_t>(INT_MAX))
-    return false;
-  dma_buf_sync sync{flags};
-  int result = 0;
-  do {
-    result = ::ioctl(static_cast<int>(descriptor.dmaHandle), DMA_BUF_IOCTL_SYNC, &sync);
-  } while (result != 0 && (errno == EINTR || errno == EAGAIN));
-  // Heaps of uncached memory do not implement the ioctl.
-  return result == 0 || errno == ENOTTY;
+  return adapter::InspectHcmBuffer(descriptor, fd) == adapter::HcmBufferAccess::kLocalDmaBuf;
 }
 
 template <typename>
@@ -172,8 +165,11 @@ struct HcmProbeSample<adapter::PointCloudHcmDescriptor>
     if (cloud.pBuf == nullptr || cloud.offset > cloud.size || cloud.size - cloud.offset < bytes)
       return HcmStampResult::kBadBuffer;
     auto * data = static_cast<std::uint8_t *>(cloud.GetDataPtr());
+    int fd = -1;
+    if (!LocalBufferFd(cloud, fd))
+      return HcmStampResult::kBadBuffer;
 
-    if (!SyncBuffer(cloud, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE))
+    if (adapter::BeginDmaBufCpuWrite(fd) != adapter::Status::kOk)
       return HcmStampResult::kSyncFailed;
     if (state.patternedBytes != bytes) {
       state.patterned = {};
@@ -187,7 +183,7 @@ struct HcmProbeSample<adapter::PointCloudHcmDescriptor>
     const std::uint64_t now = MonotonicNowNs();
     state.lastSendNs = now;
     StampFrame(data, bytes, state.streamTag, sequence, now);
-    if (!SyncBuffer(cloud, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE))
+    if (adapter::EndDmaBufCpuWrite(fd) != adapter::Status::kOk)
       return HcmStampResult::kSyncFailed;
 
     cloud.validSize = bytes;
@@ -219,11 +215,12 @@ struct HcmProbeSample<adapter::PointCloudHcmDescriptor>
         cloud.validSize > cloud.size - cloud.offset)
       return reading;
 
-    if (!SyncBuffer(cloud, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ))
+    int fd = -1;
+    if (!LocalBufferFd(cloud, fd) || adapter::BeginDmaBufCpuRead(fd) != adapter::Status::kOk)
       return reading;
     reading = CheckFrame(static_cast<const std::uint8_t *>(cloud.GetDataPtr()),
         static_cast<std::size_t>(cloud.validSize), streamTag);
-    const bool ended = SyncBuffer(cloud, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
+    const bool ended = adapter::EndDmaBufCpuRead(fd) == adapter::Status::kOk;
     if (reading.check != FrameCheck::kOk)
       return reading;
     if (!ended) {

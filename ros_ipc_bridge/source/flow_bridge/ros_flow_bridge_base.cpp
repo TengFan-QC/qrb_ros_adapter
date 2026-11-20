@@ -315,6 +315,11 @@ Status RosFlowBridgeBase::HandleFetchRequest(std::uint64_t requestId)
     return sent;
   }
 
+  if (taken == Status::kOk && contractMessage_->ByteSizeLong() > kMaxPayloadSize) {
+    // Too large for one IPC frame: drop this sample like a failed conversion.
+    taken = Status::kConversionError;
+    diagnostic = "Contract message exceeds the IPC payload limit";
+  }
   if (taken != Status::kOk) {
     ++conversionErrors_;
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,

@@ -33,11 +33,17 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
-find_package(builtin_interfaces REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
 find_package(qrb_ros_adapter_runtime ${PROJECT_VERSION} REQUIRED)
+# ROS message packages used by the mapped Contracts; also list them in package.xml.
+set(QRB_ROS_MSG_DEPENDENCIES
+  builtin_interfaces
+  std_msgs
+  geometry_msgs
+  sensor_msgs)
+foreach(_msg_dependency IN LISTS QRB_ROS_MSG_DEPENDENCIES)
+  find_package(${_msg_dependency} REQUIRED)
+endforeach()
+# qrb_ros_transport types of the DmaBuf Contracts; also list them in package.xml.
 set(QRB_ROS_TRANSPORT_DEPENDENCIES
   qrb_ros_transport_point_cloud2_type)
 foreach(_transport_dependency IN LISTS QRB_ROS_TRANSPORT_DEPENDENCIES)
@@ -67,10 +73,7 @@ set_target_properties(qrb_ros_adapter_ros_flow_bridge PROPERTIES
   EXPORT_NAME ros_flow_bridge)
 ament_target_dependencies(qrb_ros_adapter_ros_flow_bridge PUBLIC
   rclcpp
-  builtin_interfaces
-  std_msgs
-  geometry_msgs
-  sensor_msgs
+  ${QRB_ROS_MSG_DEPENDENCIES}
   ${QRB_ROS_TRANSPORT_DEPENDENCIES})
 
 # --- Dynamic Flow Manager and shared-process container -----------------------
@@ -113,10 +116,7 @@ ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   rclcpp
   rclcpp_components
-  builtin_interfaces
-  std_msgs
-  geometry_msgs
-  sensor_msgs
+  ${QRB_ROS_MSG_DEPENDENCIES}
   qrb_ros_adapter_runtime
   ${QRB_ROS_TRANSPORT_DEPENDENCIES})
 

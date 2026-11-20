@@ -97,7 +97,7 @@ ROS probe of the [Test](#test) takes `<setting>:=<value>` on its launch.
 | `adapter_config` | StreamProbe: required; ROS probe: `adapter_h2r.json` | All: a static config file; on IpcAdapter it replaces the two rows above. |
 | `input_topic` / `output_topic` | | IpcAdapter, StreamProbe: takes frames from / gives frames to another sample. |
 | `fps` | `30` | All: frames per second a sender sends, `0` for no pause. |
-| `payload_bytes` | `1048576` | All: PointCloud2 payload a sender sends. |
+| `payload_bytes` | `1048576` | All: DMA-BUF payload of a DmaBuf Contract a sender sends. |
 | `duration` | `0` | ROS probe: seconds to run, `0` until stopped. |
 | `log` | | ROS probe: text log file. |
 

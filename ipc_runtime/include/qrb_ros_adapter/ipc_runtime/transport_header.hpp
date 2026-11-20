@@ -102,11 +102,16 @@ constexpr std::size_t kTransportHeaderEncodedSize = 36;
 /**
  * @brief Upper bound on one frame's Protobuf payload.
  *
- * Contract messages are metadata only -- DMA-BUF payloads travel as fds, and
- * even a PointCloud's field list is a few hundred bytes. 1 MiB is a sanity
- * bound on a decoded `payloadSize`, not a design target.
+ * DMA-BUF payloads travel as fds, so a DmaBuf Contract message is metadata of
+ * a few hundred bytes; an Inline Contract message carries all its data. A
+ * message larger than this is dropped as a frame error before it is sent.
+ *
+ * A SOCK_SEQPACKET frame must fit in the socket send buffer, or sendmsg()
+ * fails with EMSGSIZE and closes the Flow. IpcEndpoint raises a smaller send
+ * buffer to hold this bound, within net.core.wmem_max; the default buffer
+ * (net.core.wmem_default 212992) takes about 208 KiB.
  */
-constexpr std::size_t kMaxPayloadSize = 1u << 20;
+constexpr std::size_t kMaxPayloadSize = 128u * 1024u;
 
 /**
  * @brief Upper bound on fds in one frame.

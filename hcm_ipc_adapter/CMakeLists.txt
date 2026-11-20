@@ -52,6 +52,7 @@ file(GLOB _hcm_contract_converter_sources CONFIGURE_DEPENDS
 
 add_library(QCNodeIpcAdapter OBJECT
   source/flow_client/flow_context.cpp
+  source/flow_client/hcm_dma_buffer.cpp
   source/flow_client/hcm_flow_client.cpp
   source/ipc_adapter_node/hcm_ipc_adapter_config.cpp
   source/ipc_adapter_node/hcm_ipc_adapter_node.cpp
