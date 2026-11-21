@@ -28,22 +28,17 @@ using HcmToContractFunction = ConversionResult (*)(
 using HcmDescriptorFactory = std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> (*)();
 
 /**
- * @brief QCNode custom descriptor type range used by the qrb_contracts descriptors.
+ * @brief HCM-side implementation registered for one shared Contract Descriptor.
  *
- * QCNode provides QC_BUFFER_TYPE_CUSTOM_0..CUSTOM_4; QC_BUFFER_TYPE_LAST marks
- * the end of the range.
+ * A descriptor is matched by its C++ type, not by `QCBufferType_e`:
+ * qrb_contracts descriptors may share one QCNode custom type.
  */
-inline constexpr QC::QCBufferType_e kHcmCustomDescriptorTypeBegin = QC::QC_BUFFER_TYPE_CUSTOM_0;
-inline constexpr QC::QCBufferType_e kHcmCustomDescriptorTypeEnd = QC::QC_BUFFER_TYPE_LAST;
-
-/** @brief HCM-side implementation registered for one shared Contract Descriptor. */
 struct HcmContractBinding
 {
   const ContractDescriptor * descriptor{nullptr};
   HcmDescriptorMatcher acceptsDescriptor{nullptr};
   ContractToHcmFunction contractToHcm{nullptr};
   HcmToContractFunction hcmToContract{nullptr};
-  QC::QCBufferType_e descriptorType{QC::QC_BUFFER_TYPE_MAX};
   HcmDescriptorFactory createDescriptor{nullptr};
 };
 
@@ -97,8 +92,7 @@ HcmContractBinding MakeHcmContractBinding()
 {
   return {FindContractDescriptor(ContractT::descriptor()->full_name()),
       &AcceptsHcmDescriptor<DescriptorT>, &InvokeContractToHcm<ContractT, DescriptorT>,
-      &InvokeHcmToContract<ContractT, DescriptorT>, DescriptorT().type,
-      &CreateHcmDescriptor<DescriptorT>};
+      &InvokeHcmToContract<ContractT, DescriptorT>, &CreateHcmDescriptor<DescriptorT>};
 }
 
 std::size_t HcmContractBindingCount();
@@ -106,15 +100,12 @@ const HcmContractBinding * HcmContractBindingAt(std::size_t index);
 const HcmContractBinding * FindHcmContractBinding(std::string_view contractTypeName);
 
 /**
- * @brief Return the QCNode buffer type of a Contract's descriptor.
+ * @brief Create the qrb_contracts descriptor of a Contract.
  *
- * The type is the one the qrb_contracts descriptor sets for itself, so a frame
- * built by any QCNode keeps it across descriptor copies.
+ * @p contractTypeName is the Contract full name, the same as `contract_type`
+ * in the Adapter config. Returns QC_STATUS_UNSUPPORTED for an unmapped name.
  */
-QC::QCBufferType_e GetQrbBufferDescriptorType(std::string_view contractTypeName);
-
-/** @brief Descriptor factory covering every registered qrb_contracts type. */
-QC::QCStatus_e CreateQrbBufferDescriptor(QC::QCBufferType_e type,
+QC::QCStatus_e CreateQrbBufferDescriptor(std::string_view contractTypeName,
     std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> & outDescriptor);
 
 }  // namespace qrb::adapter

@@ -267,7 +267,7 @@ Status HcmFlowClient::Fetch(QC::Memory::QCBufferDescriptorBase_t & target)
   }
   if (context_.Config().direction != Direction::kRosToHcm)
     return Status::kBadState;
-  if (!binding_->acceptsDescriptor(target) || target.type != binding_->descriptorType) {
+  if (!binding_->acceptsDescriptor(target)) {
     return Status::kInvalidArgument;
   }
 
@@ -445,7 +445,7 @@ Status HcmFlowClient::Publish(const QC::Memory::QCBufferDescriptorBase_t & sourc
   }
   if (context_.Config().direction != Direction::kHcmToRos)
     return Status::kBadState;
-  if (!binding_->acceptsDescriptor(source) || source.type != binding_->descriptorType) {
+  if (!binding_->acceptsDescriptor(source)) {
     return Status::kInvalidArgument;
   }
 
