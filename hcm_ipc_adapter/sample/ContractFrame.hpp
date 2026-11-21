@@ -63,8 +63,7 @@ public:
             return QC_STATUS_UNSUPPORTED;
         }
         std::unique_ptr<Memory::QCBufferDescriptorBase_t> created;
-        QCStatus_e ret =
-                qrb::adapter::CreateQrbBufferDescriptor( binding->descriptorType, created );
+        QCStatus_e ret = qrb::adapter::CreateQrbBufferDescriptor( contractType, created );
         if ( ( QC_STATUS_OK != ret ) || ( nullptr == created ) )
         {
             return ( QC_STATUS_OK != ret ) ? ret : QC_STATUS_UNSUPPORTED;

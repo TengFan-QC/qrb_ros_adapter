@@ -14,7 +14,6 @@ namespace qrb::adapter
 namespace
 {
 
-// Each binding takes the buffer type its qrb_contracts descriptor sets for itself.
 const std::array<HcmContractBinding, ContractDescriptorCount()> kHcmBindings{{
 #define QRB_CONTRACT_MAPPING(Id, TypeName, Payload, ContractT, DescriptorT, ...)                   \
   MakeHcmContractBinding<ContractT, DescriptorT>(),
@@ -44,23 +43,16 @@ const HcmContractBinding * FindHcmContractBinding(std::string_view contractTypeN
   return nullptr;
 }
 
-QC::QCBufferType_e GetQrbBufferDescriptorType(std::string_view contractTypeName)
-{
-  const HcmContractBinding * binding = FindHcmContractBinding(contractTypeName);
-  return binding == nullptr ? QC::QC_BUFFER_TYPE_MAX : binding->descriptorType;
-}
-
-QC::QCStatus_e CreateQrbBufferDescriptor(QC::QCBufferType_e type,
+QC::QCStatus_e CreateQrbBufferDescriptor(std::string_view contractTypeName,
     std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> & outDescriptor)
 {
   outDescriptor.reset();
-  for (const HcmContractBinding & binding : kHcmBindings) {
-    if (binding.descriptorType == type && binding.createDescriptor != nullptr) {
-      outDescriptor = binding.createDescriptor();
-      return outDescriptor == nullptr ? QC::QC_STATUS_NOMEM : QC::QC_STATUS_OK;
-    }
+  const HcmContractBinding * binding = FindHcmContractBinding(contractTypeName);
+  if (binding == nullptr || binding->createDescriptor == nullptr) {
+    return QC::QC_STATUS_UNSUPPORTED;
   }
-  return QC::QC_STATUS_UNSUPPORTED;
+  outDescriptor = binding->createDescriptor();
+  return outDescriptor == nullptr ? QC::QC_STATUS_NOMEM : QC::QC_STATUS_OK;
 }
 
 }  // namespace qrb::adapter
