@@ -39,6 +39,7 @@ set(QRB_ROS_MSG_DEPENDENCIES
   builtin_interfaces
   std_msgs
   geometry_msgs
+  nav_msgs
   sensor_msgs)
 foreach(_msg_dependency IN LISTS QRB_ROS_MSG_DEPENDENCIES)
   find_package(${_msg_dependency} REQUIRED)
@@ -58,6 +59,7 @@ file(GLOB _qrb_ros_converter_sources CONFIGURE_DEPENDS
 add_library(qrb_ros_adapter_ros_flow_bridge SHARED
   source/flow_bridge/ros_flow_bridge_base.cpp
   source/flow_bridge/ros_contract_header.cpp
+  source/flow_bridge/ros_contract_geometry.cpp
   source/flow_bridge/ros_dma_buffer_pool.cpp
   ${_qrb_ros_converter_sources})
 

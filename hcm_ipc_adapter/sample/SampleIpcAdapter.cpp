@@ -10,8 +10,9 @@
  * descriptor. The ROS Bridge (ros_ipc_bridge) must be running.
  *
  * HCM to ROS (direction 0): with input_topic, it sends every frame another sample publishes
- * there, for any Contract the Adapter maps; without, it sends a frame every 1/fps second, a
- * fixed XYZ point cloud or a pose moving along x, and rejects any other Contract in Init().
+ * there, for any Contract the Adapter maps; without, it sends a frame it fills itself
+ * (FillFrame(), UpdateFrame()) every 1/fps second, for a Contract in kFilledContracts, and
+ * rejects any other Contract in Init().
  * ROS to HCM (direction 1), for any mapped Contract: it fetches the latest ROS message into a
  * frame; with output_topic, it publishes every frame fetched there, and without, it fetches
  * every 1/fps second.
@@ -44,6 +45,7 @@
 #include "QC/sample/DataBroker.hpp"
 #include "QC/sample/SampleIF.hpp"
 #include "QRB/Memory/Geometry/PoseDescriptor.hpp"
+#include "QRB/Memory/Navigation/OdometryDescriptor.hpp"
 #include "QRB/Memory/Sensor/PointCloudDescriptor.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/ipc_adapter_node/hcm_ipc_adapter_node.hpp"
 
@@ -141,6 +143,17 @@ private:
     static constexpr const char *kPointCloudContract = "qrb.contract.sensor.v1.PointCloud2";
     static constexpr const char *kPoseContract =
             "qrb.contract.geometry.v1.PoseWithCovarianceStamped";
+    /**
+     * The Contracts FillFrame() / UpdateFrame() can fill, so the sample sends them without
+     * input_topic. To add one, add it here and give both a case for its descriptor.
+     */
+    static constexpr const char *kFilledContracts[] = {
+            kPointCloudContract,
+            kPoseContract,
+            "qrb.contract.nav.v1.Odometry",
+    };
+    bool IsFilledContract() const;
+
     static constexpr uint32_t kPointStep = 3 * sizeof( float );
     static constexpr uint64_t kMaxReportedErrors = 10;
     static constexpr uint32_t kReceiveTimeoutMs = 100;
@@ -180,6 +193,18 @@ QCStatus_e SampleIpcAdapter::LoadAdapterConfig( const std::string &path, std::st
     }
 
     return QC_STATUS_OK;
+}
+
+bool SampleIpcAdapter::IsFilledContract() const
+{
+    for ( const char *contract : kFilledContracts )
+    {
+        if ( m_contract == contract )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string SampleIpcAdapter::DefaultTopic() const
@@ -349,12 +374,12 @@ QCStatus_e SampleIpcAdapter::SetupFrames()
         // The publisher of input_topic owns the frames.
         return ret;
     }
-    if ( m_isHcmToRos && !m_isPointCloud && ( kPoseContract != m_contract ) )
+    if ( m_isHcmToRos && !IsFilledContract() )
     {
         // FillFrame() knows no other descriptor, and an unfilled one is rejected every frame.
-        QC_ERROR( "without input_topic, the sample sends only %s and %s; send %s frames on "
-                  "input_topic, for example from the StreamProbe sample",
-                  kPointCloudContract, kPoseContract, m_contract.c_str() );
+        QC_ERROR( "without input_topic, the sample sends only the Contracts it fills; send %s "
+                  "frames on input_topic, for example from the StreamProbe sample",
+                  m_contract.c_str() );
         return QC_STATUS_BAD_ARGUMENTS;
     }
 
@@ -395,12 +420,20 @@ QCStatus_e SampleIpcAdapter::SetupFrames()
     return ret;
 }
 
+/** Set the parts of a frame that stay the same from frame to frame; UpdateFrame() does the rest. */
 void SampleIpcAdapter::FillFrame( ContractFrame &frame )
 {
     auto *pose = dynamic_cast<QRB::Memory::PoseDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr != pose )
     {
         (void) pose->frameId.Assign( "map" );
+    }
+
+    auto *odom = dynamic_cast<QRB::Memory::OdometryDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != odom )
+    {
+        (void) odom->frameId.Assign( "odom" );
+        (void) odom->childFrameId.Assign( "base_link" );
     }
 
     auto *cloud = dynamic_cast<QRB::Memory::PointCloudDescriptor_t *>( &frame.Descriptor() );
@@ -448,6 +481,16 @@ void SampleIpcAdapter::UpdateFrame( ContractFrame &frame )
         // Move along the x axis of "map" by 1 cm per frame.
         pose->timestampNs = nowNs;
         pose->poseWithCovariance.pose.position.x = (double) m_frames * 0.01;
+    }
+
+    auto *odom = dynamic_cast<QRB::Memory::OdometryDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != odom )
+    {
+        // Drive along the x axis of "odom" by 1 cm per frame; the twist is that speed at fps
+        // frames per second (0 with fps 0, where frames are sent without a pause).
+        odom->timestampNs = nowNs;
+        odom->poseWithCovariance.pose.position.x = (double) m_frames * 0.01;
+        odom->twistWithCovariance.twist.linear.x = 0.01 * (double) m_fps;
     }
 }
 
