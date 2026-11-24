@@ -44,9 +44,12 @@
 #include "QC/Node/NodeFrameDescriptor.hpp"
 #include "QC/sample/DataBroker.hpp"
 #include "QC/sample/SampleIF.hpp"
+#include "QRB/Memory/Geometry/PoseArrayDescriptor.hpp"
 #include "QRB/Memory/Geometry/PoseDescriptor.hpp"
+#include "QRB/Memory/Geometry/PoseStampedDescriptor.hpp"
 #include "QRB/Memory/Geometry/TFMessageDescriptor.hpp"
 #include "QRB/Memory/Geometry/TwistDescriptor.hpp"
+#include "QRB/Memory/Geometry/Vector3Descriptor.hpp"
 #include "QRB/Memory/Navigation/OdometryDescriptor.hpp"
 #include "QRB/Memory/Sensor/PointCloudDescriptor.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/ipc_adapter_node/hcm_ipc_adapter_node.hpp"
@@ -155,6 +158,9 @@ private:
             "qrb.contract.nav.v1.Odometry",
             "qrb.contract.geometry.v1.TwistStamped",
             "qrb.contract.tf2.v1.TFMessage",
+            "qrb.contract.geometry.v1.PoseStamped",
+            "qrb.contract.geometry.v1.PoseArray",
+            "qrb.contract.geometry.v1.Vector3Stamped",
     };
     bool IsFilledContract() const;
 
@@ -463,6 +469,35 @@ void SampleIpcAdapter::FillFrame( ContractFrame &frame )
         }
     }
 
+    auto *poseStamped = dynamic_cast<QRB::Memory::PoseStampedDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != poseStamped )
+    {
+        (void) poseStamped->frameId.Assign( "map" );
+    }
+
+    auto *poses = dynamic_cast<QRB::Memory::PoseArrayDescriptor_t *>( &frame.Descriptor() );
+    if ( ( nullptr != poses ) &&
+         ( poses->size >= QRB::Memory::PoseArrayDescriptor_t::CalcBufferSize( 2 ) ) )
+    {
+        // Two poses in "map", in the heap storage of the frame: one at the origin, one 1 m above.
+        (void) poses->frameId.Assign( "map" );
+        poses->poseCount = 2;
+        poses->validSize = QRB::Memory::PoseArrayDescriptor_t::CalcBufferSize( 2 );
+        for ( uint32_t i = 0; i < 2; i++ )
+        {
+            *poses->GetPosePtr( i ) = QRB::Memory::Pose_t{};
+        }
+        poses->GetPosePtr( 1 )->position.z = 1.0;
+    }
+
+    auto *vector3 = dynamic_cast<QRB::Memory::Vector3Descriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != vector3 )
+    {
+        // Straight down in "base_link"; UpdateFrame() tilts it.
+        (void) vector3->frameId.Assign( "base_link" );
+        vector3->vector.z = -1.0;
+    }
+
     auto *cloud = dynamic_cast<QRB::Memory::PointCloudDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr == cloud )
     {
@@ -539,6 +574,34 @@ void SampleIpcAdapter::UpdateFrame( ContractFrame &frame )
         mapToOdom->timestampNs = nowNs;
         odomToBase->timestampNs = nowNs;
         odomToBase->transform.translation.x = (double) m_frames * 0.01;
+    }
+
+    auto *poseStamped = dynamic_cast<QRB::Memory::PoseStampedDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != poseStamped )
+    {
+        // Move along the x axis of "map" by 1 cm per frame.
+        poseStamped->timestampNs = nowNs;
+        poseStamped->pose.position.x = (double) m_frames * 0.01;
+    }
+
+    auto *poses = dynamic_cast<QRB::Memory::PoseArrayDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != poses )
+    {
+        poses->timestampNs = nowNs;
+        // The first pose stays put; the second moves along x by 1 cm per frame.
+        QRB::Memory::Pose_t *second = poses->GetPosePtr( 1 );
+        if ( nullptr != second )
+        {
+            second->position.x = (double) m_frames * 0.01;
+        }
+    }
+
+    auto *vector3 = dynamic_cast<QRB::Memory::Vector3Descriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != vector3 )
+    {
+        // Tilt from straight down towards x by 1 percent per frame, and back every 100 frames.
+        vector3->timestampNs = nowNs;
+        vector3->vector.x = (double) ( m_frames % 100 ) * 0.01;
     }
 }
 

@@ -6,7 +6,9 @@
  * @brief The Contract descriptor a sample hands to the IPC Adapter, and a pool of them.
  *
  * A ContractFrame owns one qrb_contracts descriptor. A DMA-BUF Contract gets a buffer of its own
- * from the system DMA heap, mapped for the CPU.
+ * from the system DMA heap, mapped for the CPU. A TFMessage or a PoseArray, whose descriptor keeps
+ * its transforms or poses in the host's buffer, gets heap storage for the most a message may
+ * carry; the other inline Contracts keep everything in the fields of their descriptor.
  * Samples pass frames to each other as std::shared_ptr<ContractFrame> over the DataBroker: a frame
  * is free again once the only reference left is the pool's.
  */
@@ -15,6 +17,7 @@
 #define QRB_ROS_ADAPTER_SAMPLE_CONTRACT_FRAME_HPP
 
 #include "QC/Infras/Memory/BufferDescriptor.hpp"
+#include "QRB/Memory/Geometry/PoseArrayDescriptor.hpp"
 #include "QRB/Memory/Geometry/TFMessageDescriptor.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_converters.hpp"
 #include "qrb_ros_adapter/ipc_runtime/contract_limits.hpp"
@@ -55,7 +58,7 @@ public:
 
     /**
      * @brief Create the descriptor of Contract @p contractType; a DMA-BUF Contract gets a
-     * buffer of @p bufferBytes.
+     * buffer of @p bufferBytes, a TFMessage or a PoseArray heap storage for its largest message.
      */
     QCStatus_e Init( const std::string &contractType, uint32_t bufferBytes )
     {
@@ -71,7 +74,8 @@ public:
             return ( QC_STATUS_OK != ret ) ? ret : QC_STATUS_UNSUPPORTED;
         }
 
-        // A DMA-BUF Contract keeps its data in the buffer.
+        // A TFMessage and a PoseArray keep their transforms and poses in the buffer of the
+        // descriptor: heap storage of the frame.
         auto *tf = dynamic_cast<QRB::Memory::TFMessageDescriptor_t *>( created.get() );
         if ( nullptr != tf )
         {
@@ -85,6 +89,20 @@ public:
             tf->allocatorType = Memory::QC_MEMORY_ALLOCATOR_HEAP;
             tf->transformCount = 0;
         }
+        auto *poses = dynamic_cast<QRB::Memory::PoseArrayDescriptor_t *>( created.get() );
+        if ( nullptr != poses )
+        {
+            // The Adapter writes a received PoseArray here, so it must fit the largest one.
+            m_poses.resize( qrb::adapter::contract_limits::kMaxPoseCount );
+            poses->pBuf = m_poses.data();
+            poses->size =
+                    QRB::Memory::PoseArrayDescriptor_t::CalcBufferSize( (uint32_t) m_poses.size() );
+            poses->offset = 0;
+            poses->validSize = 0;
+            poses->allocatorType = Memory::QC_MEMORY_ALLOCATOR_HEAP;
+            poses->poseCount = 0;
+        }
+        // A DMA-BUF Contract keeps its data in a buffer of its own.
         auto *buffer = dynamic_cast<Memory::BufferDescriptor_t *>( created.get() );
         if ( ( qrb::adapter::PayloadClass::kDmaBuf == binding->descriptor->payloadClass ) &&
              ( nullptr != buffer ) )
@@ -142,6 +160,7 @@ private:
     void *m_data = nullptr;
     size_t m_size = 0;
     std::vector<QRB::Memory::TransformStamped_t> m_transforms;
+    std::vector<QRB::Memory::Pose_t> m_poses;
 };
 
 /** @brief What samples publish and receive over the DataBroker. */
