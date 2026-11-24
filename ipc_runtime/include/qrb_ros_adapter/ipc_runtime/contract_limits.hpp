@@ -26,6 +26,9 @@ inline constexpr std::size_t kMaxTransformCount = 200;
  */
 inline constexpr std::size_t kMaxPoseCount = 1000;
 
+/** @brief Longest detection `id` and hypothesis `class_id`, in bytes. */
+inline constexpr std::size_t kMaxDetectionStringLength = 255;
+
 }  // namespace qrb::adapter::contract_limits
 
 #endif  // QRB_ROS_ADAPTER_IPC_RUNTIME_CONTRACT_LIMITS_HPP
