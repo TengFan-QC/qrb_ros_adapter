@@ -46,7 +46,7 @@
 #include "QC/sample/SampleIF.hpp"
 #include "QRB/Memory/Geometry/PoseArrayDescriptor.hpp"
 #include "QRB/Memory/Geometry/PoseDescriptor.hpp"
-#include "QRB/Memory/Geometry/PoseStampedDescriptor.hpp"
+#include "QRB/Memory/Geometry/PoseWithCovarianceDescriptor.hpp"
 #include "QRB/Memory/Geometry/TFMessageDescriptor.hpp"
 #include "QRB/Memory/Geometry/TwistDescriptor.hpp"
 #include "QRB/Memory/Geometry/Vector3Descriptor.hpp"
@@ -433,7 +433,7 @@ QCStatus_e SampleIpcAdapter::SetupFrames()
 /** Set the parts of a frame that stay the same from frame to frame; UpdateFrame() does the rest. */
 void SampleIpcAdapter::FillFrame( ContractFrame &frame )
 {
-    auto *pose = dynamic_cast<QRB::Memory::PoseDescriptor_t *>( &frame.Descriptor() );
+    auto *pose = dynamic_cast<QRB::Memory::PoseWithCovarianceDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr != pose )
     {
         (void) pose->frameId.Assign( "map" );
@@ -469,7 +469,7 @@ void SampleIpcAdapter::FillFrame( ContractFrame &frame )
         }
     }
 
-    auto *poseStamped = dynamic_cast<QRB::Memory::PoseStampedDescriptor_t *>( &frame.Descriptor() );
+    auto *poseStamped = dynamic_cast<QRB::Memory::PoseDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr != poseStamped )
     {
         (void) poseStamped->frameId.Assign( "map" );
@@ -537,7 +537,7 @@ void SampleIpcAdapter::UpdateFrame( ContractFrame &frame )
         cloud->timestampNs = nowNs;
     }
 
-    auto *pose = dynamic_cast<QRB::Memory::PoseDescriptor_t *>( &frame.Descriptor() );
+    auto *pose = dynamic_cast<QRB::Memory::PoseWithCovarianceDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr != pose )
     {
         // Move along the x axis of "map" by 1 cm per frame.
@@ -576,7 +576,7 @@ void SampleIpcAdapter::UpdateFrame( ContractFrame &frame )
         odomToBase->transform.translation.x = (double) m_frames * 0.01;
     }
 
-    auto *poseStamped = dynamic_cast<QRB::Memory::PoseStampedDescriptor_t *>( &frame.Descriptor() );
+    auto *poseStamped = dynamic_cast<QRB::Memory::PoseDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr != poseStamped )
     {
         // Move along the x axis of "map" by 1 cm per frame.

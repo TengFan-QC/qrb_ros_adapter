@@ -4,7 +4,7 @@
 #ifndef QRB_ROS_ADAPTER_HCM_IPC_ADAPTER_FLOW_CLIENT_POSE_STAMPED_HCM_CONVERTER_HPP
 #define QRB_ROS_ADAPTER_HCM_IPC_ADAPTER_FLOW_CLIENT_POSE_STAMPED_HCM_CONVERTER_HPP
 
-#include "QRB/Memory/Geometry/PoseStampedDescriptor.hpp"
+#include "QRB/Memory/Geometry/PoseDescriptor.hpp"
 #include "qrb/contract/geometry/v1/pose_stamped.pb.h"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_conversion.hpp"
 
@@ -12,7 +12,7 @@ namespace qrb::adapter
 {
 
 using PoseStampedHcmContract = ::qrb::contract::geometry::v1::PoseStamped;
-using PoseStampedHcmDescriptor = QRB::Memory::PoseStampedDescriptor_t;
+using PoseStampedHcmDescriptor = QRB::Memory::PoseDescriptor_t;
 
 template <>
 ConversionResult ConvertContractToHcm<PoseStampedHcmContract, PoseStampedHcmDescriptor>(
