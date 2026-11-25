@@ -60,7 +60,7 @@ constexpr std::uint64_t kCloudBytes = 128;
 
 }  // namespace
 
-// UT-IPC-03: Contract validation is the last line before a value reaches either
+// Contract validation is the last line before a value reaches either
 // side; a PointCloud layout must fit the external payload exactly as declared.
 TEST(ContractValidation, RejectsInvalidPosesAndLayoutsThePayloadCannotBack)
 {
@@ -153,7 +153,7 @@ qrb::contract::nav::v1::Odometry MakeOdometry()
 
 }  // namespace
 
-// UT-IPC-03: Odometry shares the Pose rules for its pose and adds the same
+// Odometry shares the Pose rules for its pose and adds the same
 // finite / 36-value rules for its twist and a frame_id check for child_frame_id.
 TEST(ContractValidation, RejectsInvalidOdometry)
 {
@@ -215,7 +215,7 @@ TEST(ContractValidation, RejectsInvalidOdometry)
   }
 }
 
-// UT-IPC-04: TwistStamped needs a valid header and a present, finite twist.
+// TwistStamped needs a valid header and a present, finite twist.
 TEST(ContractValidation, RejectsInvalidTwistStamped)
 {
   geometry_proto::TwistStamped twist;
@@ -252,7 +252,7 @@ TEST(ContractValidation, RejectsInvalidTwistStamped)
   }
 }
 
-// UT-IPC-05: TFMessage checks every transform: header, child_frame_id and a
+// TFMessage checks every transform: header, child_frame_id and a
 // finite, non-zero rotation; an empty message is valid.
 TEST(ContractValidation, RejectsInvalidTFMessage)
 {

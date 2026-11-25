@@ -9,13 +9,13 @@
 // the statistics of a stream, and the parameters. Neither ROS nor QCNode is
 // used here.
 //
-// A byte payload (DMA-BUF Contracts) is laid out as
+// A byte payload (DmaBuf Contracts) is laid out as
 //
 //   [ ProbeHeader | pattern ... | sentinel ]
 //
 // A sender writes the pattern once per buffer and per frame rewrites only the
 // header and the sentinel; a receiver checks both and one pattern word every
-// kSampleStride bytes. An inline Contract carries the same values as exact
+// kSampleStride bytes. An Inline Contract carries the same values as exact
 // integers in an array of doubles.
 //
 // The ROS side takes its parameters from the built-in defaults, a JSON
@@ -217,7 +217,7 @@ inline FrameReading CheckFrame(const std::uint8_t * data, std::size_t size, std:
   return reading;
 }
 
-// --- inline payloads -----------------------------------------------------------
+// --- Inline payloads -----------------------------------------------------------
 
 //
 // An array of doubles, e.g. a pose covariance, as
@@ -850,7 +850,7 @@ struct ProbeParams
   std::string adapterConfig;             // the Adapter's static config
   double fps{30.0};                      // frames per second, 0: unlimited
   std::uint64_t payloadBytes{1u << 20};  // what a sender sends per frame
-  std::uint64_t bufferBytes{32u << 20};  // the DMA buffer an HCM receiver offers
+  std::uint64_t bufferBytes{32u << 20};  // DMA buffer size of the HCM receiver (R2H)
   double duration{0.0};                  // seconds, 0: until stopped
   double warmup{0.0};                    // seconds
   std::string log;                       // text log file, empty: none

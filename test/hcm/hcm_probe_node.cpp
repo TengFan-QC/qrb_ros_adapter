@@ -55,8 +55,8 @@ enum class HcmStampResult
 };
 
 /**
- * @brief The fd to sync around CPU access to the buffer of `descriptor`; like
- * the Adapter, false unless the buffer is a DMA-BUF of this process.
+ * @brief The fd to sync around CPU access to the buffer of `descriptor`; the same rule as
+ * the Adapter: false unless the buffer is a DMA-BUF of this process.
  */
 inline bool LocalBufferFd(const QC::Memory::BufferDescriptor_t & descriptor, int & fd)
 {
@@ -88,7 +88,7 @@ struct HcmProbeSample
       "add an HcmProbeSample<> for the new Contract in test/hcm/hcm_probe_node.cpp");
 };
 
-// --- geometry.v1.PoseWithCovarianceStamped (inline) ---------------------------
+// --- geometry.v1.PoseWithCovarianceStamped (Inline) ---------------------------
 
 /** The probe fills the covariance; the pose is the identity. */
 template <>
@@ -137,7 +137,7 @@ struct HcmProbeSample<adapter::PoseHcmDescriptor>
   }
 };
 
-// --- nav.v1.Odometry (inline) -------------------------------------------------
+// --- nav.v1.Odometry (Inline) -------------------------------------------------
 
 /**
  * The probe fills the pose covariance; the pose is the identity,
@@ -193,7 +193,7 @@ struct HcmProbeSample<adapter::OdometryHcmDescriptor>
   }
 };
 
-// --- geometry.v1.TwistStamped (inline) ----------------------------------------
+// --- geometry.v1.TwistStamped (Inline) ----------------------------------------
 
 /**
  * The twist has no covariance, so the probe stamps its six values themselves,
@@ -242,7 +242,7 @@ struct HcmProbeSample<adapter::TwistHcmDescriptor>
   }
 };
 
-// --- tf2.v1.TFMessage (inline, over the descriptor's buffer) ------------------
+// --- tf2.v1.TFMessage (Inline, over the descriptor's buffer) ------------------
 
 /**
  * kTransforms transforms in the descriptor's buffer. The six translation and

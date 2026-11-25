@@ -20,7 +20,7 @@
 
 using namespace qrb::adapter;
 
-// UT-HCM-02: every shared Contract has exactly one complete HCM binding, and the
+// Every shared Contract has exactly one complete HCM binding, and the
 // descriptor factory creates, by Contract name, descriptors only that binding
 // accepts.
 TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
@@ -67,7 +67,7 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
   EXPECT_FALSE(pose.contractToHcm(poseContract, DmaBufView{}, cloudDescriptor));
   EXPECT_FALSE(pose.hcmToContract(cloudDescriptor, poseContract));
 
-  // Pose and Odometry are both inline geometry; neither takes the other's descriptor.
+  // Inline Contracts do not take each other's descriptors, even when their shapes are similar.
   const HcmContractBinding & odom = *FindHcmContractBinding(kOdometryContractType);
   OdometryHcmDescriptor odomDescriptor;
   PoseHcmDescriptor poseDescriptor;
@@ -78,7 +78,7 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
   EXPECT_FALSE(odom.contractToHcm(odomContract, DmaBufView{}, poseDescriptor));
   EXPECT_FALSE(odom.hcmToContract(poseDescriptor, odomContract));
 
-  // Twist and Odometry are inline geometry too; neither takes the other's descriptor.
+  // Each Inline Contract binding rejects the other Inline descriptors.
   const HcmContractBinding & twist = *FindHcmContractBinding(kTwistStampedContractType);
   TwistHcmDescriptor twistDescriptor;
   TwistHcmContract twistContract;
@@ -88,7 +88,7 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
   EXPECT_FALSE(twist.contractToHcm(twistContract, DmaBufView{}, odomDescriptor));
   EXPECT_FALSE(twist.hcmToContract(odomDescriptor, twistContract));
 
-  // TFMessage is inline geometry too; neither takes the other's descriptor.
+  // Each Inline Contract binding rejects the other Inline descriptors.
   const HcmContractBinding & tf = *FindHcmContractBinding(kTFMessageContractType);
   TFMessageHcmDescriptor tfDescriptor;
   TFMessageHcmContract tfContract;

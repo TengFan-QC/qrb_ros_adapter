@@ -5,10 +5,8 @@
  * @file ContractFrame.hpp
  * @brief The Contract descriptor a sample hands to the IPC Adapter, and a pool of them.
  *
- * A ContractFrame owns one qrb_contracts descriptor. A DMA-BUF Contract gets a buffer of its own
- * from the system DMA heap, mapped for the CPU. A TFMessage or a PoseArray, whose descriptor keeps
- * its transforms or poses in the host's buffer, gets heap storage for the most a message may
- * carry; the other inline Contracts keep everything in the fields of their descriptor.
+ * A ContractFrame owns one qrb_contracts descriptor. A DmaBuf Contract gets a buffer of its own
+ * from the system DMA heap, mapped for the CPU.
  * Samples pass frames to each other as std::shared_ptr<ContractFrame> over the DataBroker: a frame
  * is free again once the only reference left is the pool's.
  */
@@ -57,8 +55,8 @@ public:
     ContractFrame &operator=( const ContractFrame & ) = delete;
 
     /**
-     * @brief Create the descriptor of Contract @p contractType; a DMA-BUF Contract gets a
-     * buffer of @p bufferBytes, a TFMessage or a PoseArray heap storage for its largest message.
+     * @brief Create the descriptor of Contract @p contractType; a DmaBuf Contract gets a
+     * buffer of @p bufferBytes.
      */
     QCStatus_e Init( const std::string &contractType, uint32_t bufferBytes )
     {
@@ -74,12 +72,11 @@ public:
             return ( QC_STATUS_OK != ret ) ? ret : QC_STATUS_UNSUPPORTED;
         }
 
-        // A TFMessage and a PoseArray keep their transforms and poses in the buffer of the
-        // descriptor: heap storage of the frame.
         auto *tf = dynamic_cast<QRB::Memory::TFMessageDescriptor_t *>( created.get() );
         if ( nullptr != tf )
         {
-            // The Adapter writes a received TFMessage here, so it must fit the largest one.
+            // A TFMessage is Inline but variable-length: its transforms live in frame heap storage,
+            // sized for the largest message the Adapter may write.
             m_transforms.resize( qrb::adapter::contract_limits::kMaxTransformCount );
             tf->pBuf = m_transforms.data();
             tf->size = QRB::Memory::TFMessageDescriptor_t::CalcBufferSize(
