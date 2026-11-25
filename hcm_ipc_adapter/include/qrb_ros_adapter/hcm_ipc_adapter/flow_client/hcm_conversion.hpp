@@ -11,10 +11,12 @@
 
 #include "QC/Common/QCString.hpp"
 #include "QRB/Memory/Common/Types.hpp"
+#include "qrb/contract/geometry/v1/pose.pb.h"
 #include "qrb/contract/geometry/v1/pose_with_covariance.pb.h"
 #include "qrb/contract/geometry/v1/transform.pb.h"
 #include "qrb/contract/geometry/v1/twist.pb.h"
 #include "qrb/contract/geometry/v1/twist_with_covariance.pb.h"
+#include "qrb/contract/geometry/v1/vector3.pb.h"
 #include "qrb_ros_adapter/ipc_runtime/conversion_result.hpp"
 
 namespace qrb::adapter
@@ -50,6 +52,13 @@ std::string HcmStringToContract(const QC::QCString<N> & source)
  * as the zero matrix, "unknown") or holds the 36 values the array holds. The
  * HCM to Contract direction always writes all 36 values.
  */
+void PoseToHcm(const ::qrb::contract::geometry::v1::Pose & source, QRB::Memory::Pose_t & target);
+void PoseToContract(const QRB::Memory::Pose_t & source,
+    ::qrb::contract::geometry::v1::Pose & target);
+void Vector3ToHcm(const ::qrb::contract::geometry::v1::Vector3 & source,
+    QRB::Memory::Vector3d_t & target);
+void Vector3ToContract(const QRB::Memory::Vector3d_t & source,
+    ::qrb::contract::geometry::v1::Vector3 & target);
 void PoseWithCovarianceToHcm(const ::qrb::contract::geometry::v1::PoseWithCovariance & source,
     QRB::Memory::PoseWithCovariance_t & target);
 void PoseWithCovarianceToContract(const QRB::Memory::PoseWithCovariance_t & source,

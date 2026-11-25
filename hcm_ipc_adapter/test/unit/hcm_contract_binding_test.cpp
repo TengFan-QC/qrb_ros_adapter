@@ -5,13 +5,18 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_converters.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/odometry_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/point_cloud_hcm_converter.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_array_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_hcm_converter.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_stamped_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/tf_message_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/twist_hcm_converter.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/vector3_stamped_hcm_converter.hpp"
 
 using namespace qrb::adapter;
 
@@ -92,4 +97,70 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
   EXPECT_FALSE(twist.acceptsDescriptor(tfDescriptor));
   EXPECT_FALSE(tf.contractToHcm(tfContract, DmaBufView{}, twistDescriptor));
   EXPECT_FALSE(tf.hcmToContract(twistDescriptor, tfContract));
+}
+
+namespace
+{
+
+/** @brief One inline geometry Contract, and a Contract message and descriptor of its own. */
+struct GeometryEntry
+{
+  std::string_view contractType;
+  std::unique_ptr<google::protobuf::MessageLite> contract;
+  std::unique_ptr<QC::Memory::QCBufferDescriptorBase_t> descriptor;
+};
+
+template <typename ContractT, typename DescriptorT>
+GeometryEntry MakeGeometryEntry(std::string_view contractType)
+{
+  return GeometryEntry{
+      contractType, std::make_unique<ContractT>(), std::make_unique<DescriptorT>()};
+}
+
+}  // namespace
+
+// UT-HCM-02: the inline geometry Contracts share the value types of qrb_contracts, and some of
+// their descriptors a buffer type, but a binding takes only the descriptor and the Contract of
+// its own, whichever way it converts.
+TEST(HcmContractBinding, EveryGeometryBindingTakesOnlyItsOwnDescriptorAndContract)
+{
+  std::vector<GeometryEntry> entries;
+  entries.push_back(MakeGeometryEntry<PoseHcmContract, PoseHcmDescriptor>(
+      kPoseWithCovarianceStampedContractType));
+  entries.push_back(MakeGeometryEntry<PoseStampedHcmContract, PoseStampedHcmDescriptor>(
+      kPoseStampedContractType));
+  entries.push_back(
+      MakeGeometryEntry<PoseArrayHcmContract, PoseArrayHcmDescriptor>(kPoseArrayContractType));
+  entries.push_back(
+      MakeGeometryEntry<TwistHcmContract, TwistHcmDescriptor>(kTwistStampedContractType));
+  entries.push_back(
+      MakeGeometryEntry<TFMessageHcmContract, TFMessageHcmDescriptor>(kTFMessageContractType));
+  entries.push_back(MakeGeometryEntry<Vector3StampedHcmContract, Vector3StampedHcmDescriptor>(
+      kVector3StampedContractType));
+  entries.push_back(
+      MakeGeometryEntry<OdometryHcmContract, OdometryHcmDescriptor>(kOdometryContractType));
+
+  for (std::size_t i = 0; i < entries.size(); ++i) {
+    const std::string name(entries[i].contractType);
+    const HcmContractBinding * binding = FindHcmContractBinding(name);
+    ASSERT_NE(binding, nullptr) << name;
+    for (std::size_t j = 0; j < entries.size(); ++j) {
+      const std::string other(entries[j].contractType);
+      EXPECT_EQ(binding->acceptsDescriptor(*entries[j].descriptor), i == j) << name << " " << other;
+      if (i == j)
+        continue;
+      // The descriptor of another Contract, in either direction.
+      EXPECT_FALSE(
+          binding->contractToHcm(*entries[i].contract, DmaBufView{}, *entries[j].descriptor))
+          << name << " " << other;
+      EXPECT_FALSE(binding->hcmToContract(*entries[j].descriptor, *entries[i].contract))
+          << name << " " << other;
+      // The message of another Contract, in either direction.
+      EXPECT_FALSE(
+          binding->contractToHcm(*entries[j].contract, DmaBufView{}, *entries[i].descriptor))
+          << name << " " << other;
+      EXPECT_FALSE(binding->hcmToContract(*entries[i].descriptor, *entries[j].contract))
+          << name << " " << other;
+    }
+  }
 }

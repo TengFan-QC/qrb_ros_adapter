@@ -289,6 +289,53 @@ inline FrameReading CheckDoubles(const double * values, std::size_t count, std::
   return reading;
 }
 
+//
+// A message with a header stamp but too few doubles for StampDoubles(), e.g. a Vector3Stamped
+// with its three, as
+//   [ streamTag, sequence, sentinel ]
+// and the send time as the header stamp itself (sec and nanosec of the CLOCK_MONOTONIC time, so
+// exact to the nanosecond), which the caller passes to the checker. There is no magic and no
+// pattern: the stream tag and the sentinel tell a foreign or a damaged frame apart.
+//
+
+constexpr std::size_t kTripleDoubles = 3;
+
+inline void StampTriple(double * values, std::uint32_t streamTag, std::uint64_t sequence)
+{
+  values[0] = static_cast<double>(streamTag);
+  values[1] = static_cast<double>(sequence);
+  values[2] = LowWord(SentinelWord(streamTag, sequence));
+}
+
+/** @param sendTimeNs the header stamp of the message, in nanoseconds */
+inline FrameReading CheckTriple(const double * values,
+    std::uint64_t sendTimeNs,
+    std::uint32_t streamTag)
+{
+  FrameReading reading;
+  if (values == nullptr)
+    return reading;
+  const auto word = [](double value) {
+    return value >= 0.0 && value < 18446744073709551616.0 ? static_cast<std::uint64_t>(value) :
+                                                            ~std::uint64_t{0};
+  };
+  reading.header.magic = kProbeMagic;
+  reading.header.streamTag = static_cast<std::uint32_t>(word(values[0]));
+  reading.header.sequence = word(values[1]);
+  reading.header.sendTimeNs = sendTimeNs;
+  if (values[0] != static_cast<double>(streamTag)) {
+    reading.check = FrameCheck::kForeignStream;
+    return reading;
+  }
+  if (values[2] != LowWord(SentinelWord(streamTag, reading.header.sequence))) {
+    reading.check = FrameCheck::kBadSentinel;
+    reading.badOffset = 2;
+    return reading;
+  }
+  reading.check = FrameCheck::kOk;
+  return reading;
+}
+
 // --- DMA-BUF mapping -------------------------------------------------------------
 
 /**
