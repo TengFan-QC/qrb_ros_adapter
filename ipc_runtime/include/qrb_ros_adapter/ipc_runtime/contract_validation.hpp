@@ -14,6 +14,7 @@
 #include "qrb/contract/geometry/v1/twist_stamped.pb.h"
 #include "qrb/contract/geometry/v1/vector3_stamped.pb.h"
 #include "qrb/contract/nav/v1/odometry.pb.h"
+#include "qrb/contract/sensor/v1/joint_state.pb.h"
 #include "qrb/contract/sensor/v1/point_cloud2.pb.h"
 #include "qrb/contract/tf2/v1/tf_message.pb.h"
 #include "qrb_ros_adapter/ipc_runtime/contract_limits.hpp"
@@ -45,6 +46,10 @@ ConversionResult ValidateTwistStamped(const qrb::contract::geometry::v1::TwistSt
  * `child_frame_id` (as a frame_id), a finite translation and a finite, non-zero rotation.
  */
 ConversionResult ValidateTFMessage(const qrb::contract::tf2::v1::TFMessage & message);
+
+/** @brief Checks the header, joint count/names and finite measurement arrays, each empty or
+ * name-sized. */
+ConversionResult ValidateJointState(const qrb::contract::sensor::v1::JointState & message);
 
 /**
  * @brief Checks the header and that the pose is present, with a finite position and orientation
