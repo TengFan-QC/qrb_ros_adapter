@@ -11,6 +11,7 @@
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/detection_2d_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/detection_3d_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/hcm_converters.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/joint_state_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/odometry_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/point_cloud_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_array_hcm_converter.hpp"
@@ -117,6 +118,15 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
   EXPECT_FALSE(detection3d.contractToHcm(contract3d, DmaBufView{}, descriptor2d));
   EXPECT_FALSE(detection3d.hcmToContract(descriptor2d, contract3d));
   EXPECT_FALSE(detection2d.contractToHcm(contract3d, DmaBufView{}, descriptor2d));
+  // JointState and TFMessage share CUSTOM_4, but their C++ descriptors are distinct.
+  const HcmContractBinding & joints = *FindHcmContractBinding(kJointStateContractType);
+  JointStateHcmDescriptor jointDescriptor;
+  JointStateHcmContract jointContract;
+  EXPECT_TRUE(joints.acceptsDescriptor(jointDescriptor));
+  EXPECT_FALSE(joints.acceptsDescriptor(tfDescriptor));
+  EXPECT_FALSE(tf.acceptsDescriptor(jointDescriptor));
+  EXPECT_FALSE(joints.contractToHcm(jointContract, DmaBufView{}, tfDescriptor));
+  EXPECT_FALSE(joints.hcmToContract(tfDescriptor, jointContract));
 }
 
 namespace
